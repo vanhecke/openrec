@@ -25,7 +25,7 @@ final class GrokServiceTests: XCTestCase {
 
         XCTAssertEqual(request.httpMethod, "GET")
         XCTAssertEqual(request.url?.host, "api.x.ai")
-        XCTAssertEqual(request.url?.path, "/v1/models/grok-4.3")
+        XCTAssertEqual(request.url?.path, "/v1/models/grok-4.7")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(apiKey)")
         XCTAssertFalse(request.url?.absoluteString.contains(apiKey) == true)
         XCTAssertFalse(request.url?.host == "api.openai.com")
@@ -46,8 +46,8 @@ final class GrokServiceTests: XCTestCase {
         XCTAssertEqual(request.url?.absoluteString, "https://api.x.ai/v1/chat/completions")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(apiKey)")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
-        XCTAssertEqual(body?["model"] as? String, "grok-4.3")
-        XCTAssertEqual(body?["reasoning_effort"] as? String, "low")
+        XCTAssertEqual(body?["model"] as? String, "grok-4.7")
+        XCTAssertEqual(body?["reasoning_effort"] as? String, "high")
         XCTAssertNil(body?["search_parameters"])
         XCTAssertEqual(responseFormat?["type"] as? String, "json_schema")
         XCTAssertEqual(schema?["name"] as? String, "meeting_insights")
@@ -88,7 +88,7 @@ final class GrokServiceTests: XCTestCase {
             XCTAssertEqual(request.url?.host, "api.x.ai")
             return (
                 Self.response(url: try XCTUnwrap(request.url)),
-                Data(#"{"id":"grok-4.3","object":"model"}"#.utf8)
+                Data(#"{"id":"grok-4.7","object":"model"}"#.utf8)
             )
         }
         try await service.validateAccess()
@@ -135,7 +135,7 @@ final class GrokServiceTests: XCTestCase {
             let body = try JSONSerialization.jsonObject(with: try Self.bodyData(from: request)) as? [String: Any]
             XCTAssertEqual(request.url?.host, "api.x.ai")
             XCTAssertNotEqual(request.url?.host, "api.openai.com")
-            XCTAssertEqual(body?["model"] as? String, "grok-4.3")
+            XCTAssertEqual(body?["model"] as? String, "grok-4.7")
             return (
                 Self.response(url: try XCTUnwrap(request.url)),
                 Self.completion(Self.insightsJSON)
@@ -758,7 +758,8 @@ final class GrokServiceTests: XCTestCase {
             let body = try JSONSerialization.jsonObject(with: try Self.bodyData(from: request)) as? [String: Any]
             switch host {
             case "api.x.ai":
-                XCTAssertEqual(body?["model"] as? String, "grok-4.3")
+                XCTAssertEqual(body?["model"] as? String, "grok-4.7")
+                XCTAssertEqual(body?["reasoning_effort"] as? String, "high")
             case "api.openai.com":
                 XCTAssertEqual(body?["model"] as? String, "gpt-5-mini")
                 XCTAssertEqual(request.url?.path, "/v1/chat/completions")

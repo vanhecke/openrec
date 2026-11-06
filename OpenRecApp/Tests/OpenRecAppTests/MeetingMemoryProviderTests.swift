@@ -208,6 +208,8 @@ final class MeetingMemoryProviderTests: XCTestCase {
         XCTAssertFalse(MeetingMemoryProvider.grok.missingKeyConfigurationMessage.contains("OpenAI"))
         XCTAssertEqual(MeetingMemoryProvider.grok.keychainAccount, "xai-api-key")
         XCTAssertEqual(MeetingMemoryProvider.grok.verifiedDefaultsKey, "XAIKeyVerified")
+        XCTAssertEqual(MeetingMemoryProvider.grok.modelID, "grok-4.7")
+        XCTAssertEqual(MeetingMemoryProvider.openai.modelID, "gpt-5-mini")
         XCTAssertEqual(MeetingMemoryProvider.openai.keychainAccount, "openai-api-key")
         XCTAssertTrue(TranscriptionProvider.assemblyAI.missingKeySettingsMessage.contains("AssemblyAI"))
         XCTAssertTrue(TranscriptionProvider.grok.missingKeySettingsMessage.contains("Grok"))
