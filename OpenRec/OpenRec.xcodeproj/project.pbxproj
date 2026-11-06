@@ -28,6 +28,7 @@
 		A1000062243B0001 /* CloudStorageManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000072243B0001 /* CloudStorageManager.swift */; };
 		A1000063243B0001 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000073243B0001 /* KeychainStore.swift */; };
 		A1000064243B0001 /* MeetingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000074243B0001 /* MeetingModels.swift */; };
+		A10000E0243B0006 /* LocalMeetingTextFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000E1243B0006 /* LocalMeetingTextFiles.swift */; };
 		A1000065243B0001 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000075243B0001 /* OnboardingView.swift */; };
 		A1000066243B0001 /* OpenAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000076243B0001 /* OpenAIService.swift */; };
 		A10000CF243B0003 /* GrokService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000CE243B0003 /* GrokService.swift */; };
@@ -69,6 +70,7 @@
 		A1000072243B0001 /* CloudStorageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudStorageManager.swift; sourceTree = "<group>"; };
 		A1000073243B0001 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		A1000074243B0001 /* MeetingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingModels.swift; sourceTree = "<group>"; };
+		A10000E1243B0006 /* LocalMeetingTextFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMeetingTextFiles.swift; sourceTree = "<group>"; };
 		A1000075243B0001 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A1000076243B0001 /* OpenAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIService.swift; sourceTree = "<group>"; };
 		A10000CE243B0003 /* GrokService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokService.swift; sourceTree = "<group>"; };
@@ -143,6 +145,7 @@
 				A100007F243B0001 /* APIKeyAutoVerifier.swift */,
 				A1000073243B0001 /* KeychainStore.swift */,
 				A1000074243B0001 /* MeetingModels.swift */,
+				A10000E1243B0006 /* LocalMeetingTextFiles.swift */,
 				A1000075243B0001 /* OnboardingView.swift */,
 				A1000076243B0001 /* OpenAIService.swift */,
 				A10000CE243B0003 /* GrokService.swift */,
@@ -273,6 +276,7 @@
 				A100006F243B0001 /* APIKeyAutoVerifier.swift in Sources */,
 				A1000063243B0001 /* KeychainStore.swift in Sources */,
 				A1000064243B0001 /* MeetingModels.swift in Sources */,
+				A10000E0243B0006 /* LocalMeetingTextFiles.swift in Sources */,
 				A1000065243B0001 /* OnboardingView.swift in Sources */,
 				A1000066243B0001 /* OpenAIService.swift in Sources */,
 				A10000CF243B0003 /* GrokService.swift in Sources */,
