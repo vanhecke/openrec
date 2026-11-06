@@ -413,6 +413,19 @@ struct OpenRecSettingsView: View {
                     ) {
                         recorderManager.transcriptionManager.transcriptionProvider = .grok
                     }
+                    if recorderManager.transcriptionManager.transcriptionProvider == .grok {
+                        Text("Language")
+                            .font(.system(size: 10))
+                            .foregroundColor(secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 4)
+                        GrokLanguageSettingsMenu(
+                            language: Binding(
+                                get: { recorderManager.transcriptionManager.grokTranscriptionLanguage },
+                                set: { recorderManager.transcriptionManager.grokTranscriptionLanguage = $0 }
+                            )
+                        )
+                    }
                 }
             }
 
@@ -957,6 +970,55 @@ private struct SettingsToggleRow: View {
 
 private struct SettingsDivider: View {
     var body: some View { Color.white.opacity(0.06).frame(height: 1) }
+}
+
+private struct GrokLanguageSettingsMenu: View {
+    @Binding var language: GrokTranscriptionLanguage
+
+    var body: some View {
+        Menu {
+            ForEach(GrokTranscriptionLanguage.allCases) { option in
+                Button {
+                    language = option
+                } label: {
+                    if option == language {
+                        Label(option.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(option.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 11) {
+                Image(systemName: "globe")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(language.displayName)
+                        .font(.system(size: 11.5, weight: .semibold))
+                    Text(language.pickerDetail)
+                        .font(.system(size: 10))
+                        .foregroundColor(Color.white.opacity(0.43))
+                }
+                Spacer()
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.35))
+            }
+            .foregroundColor(Color.white.opacity(0.86))
+            .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 50)
+            .background(Color.white.opacity(0.025))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel("Grok transcription language")
+    }
 }
 
 private struct StorageSettingsChoice: View {

@@ -106,6 +106,14 @@ final class TranscriptionManager: ObservableObject {
         }
     }
 
+    var grokTranscriptionLanguage: GrokTranscriptionLanguage {
+        get { GrokTranscriptionLanguage.stored() }
+        set {
+            newValue.store()
+            objectWillChange.send()
+        }
+    }
+
     var transcriptionCredentials: TranscriptionCredentials {
         TranscriptionCredentials(
             provider: transcriptionProvider,
@@ -215,7 +223,10 @@ final class TranscriptionManager: ObservableObject {
             case .assemblyAI:
                 segments = try await AssemblyAIService(apiKey: assemblyAIAPIKey).transcribe(fileURL: audioURL)
             case .grok:
-                segments = try await GrokService(apiKey: xaiAPIKey).transcribe(fileURL: audioURL)
+                segments = try await GrokService(apiKey: xaiAPIKey).transcribe(
+                    fileURL: audioURL,
+                    language: grokTranscriptionLanguage
+                )
             }
             committedSegments = segments
             partialText = ""
@@ -239,7 +250,10 @@ final class TranscriptionManager: ObservableObject {
             case .assemblyAI:
                 segments = try await AssemblyAIService(apiKey: assemblyAIAPIKey).transcribe(audioURL: audioURL)
             case .grok:
-                segments = try await GrokService(apiKey: xaiAPIKey).transcribe(audioURL: audioURL)
+                segments = try await GrokService(apiKey: xaiAPIKey).transcribe(
+                    audioURL: audioURL,
+                    language: grokTranscriptionLanguage
+                )
             }
             committedSegments = segments
             partialText = ""
