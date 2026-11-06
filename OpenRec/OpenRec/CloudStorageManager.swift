@@ -17,6 +17,7 @@ struct CloudStorageContext: @unchecked Sendable {
     fileprivate let managedBaseURL: URL?
     fileprivate let managedToken: String?
     fileprivate let r2Signer: R2RequestSigner?
+    fileprivate let localDirectory: URL?
 }
 
 enum ManagedSignOutPrivacy {
@@ -113,10 +114,64 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
     var isManagedSignedIn: Bool { !KeychainStore.string(for: "managed-session-token").isEmpty }
     var canStoreTranscriptInCloud: Bool { mode == .managed && isManagedSignedIn }
     var isReady: Bool {
+        Self.storageIsReady(
+            mode: mode,
+            managedSignedIn: isManagedSignedIn,
+            r2AccountID: r2AccountID,
+            r2Bucket: r2Bucket,
+            r2AccessKeyID: r2AccessKeyID,
+            r2SecretAccessKey: r2SecretAccessKey
+        )
+    }
+
+    static let recordingsDirectoryDefaultsKey = "RecordingsDirectory"
+
+    /// `RecordingsDirectory` when set, otherwise `~/Movies/OpenRec`.
+    static func recordingsDirectory(
+        defaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) -> URL {
+        let configured = defaults.string(forKey: recordingsDirectoryDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !configured.isEmpty {
+            return URL(fileURLWithPath: configured, isDirectory: true)
+        }
+        let movies = fileManager.urls(for: .moviesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true).appendingPathComponent("Movies", isDirectory: true)
+        return movies.appendingPathComponent("OpenRec", isDirectory: true)
+    }
+
+    var recordingsDirectoryPath: String { Self.recordingsDirectory().path }
+
+    func chooseRecordingsDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "OpenRec will save recordings in this folder."
+        panel.directoryURL = Self.recordingsDirectory()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        UserDefaults.standard.set(url.path, forKey: Self.recordingsDirectoryDefaultsKey)
+        objectWillChange.send()
+    }
+
+    static func storageIsReady(
+        mode: StorageMode,
+        managedSignedIn: Bool,
+        r2AccountID: String,
+        r2Bucket: String,
+        r2AccessKeyID: String,
+        r2SecretAccessKey: String
+    ) -> Bool {
         switch mode {
-        case .managed: return isManagedSignedIn
+        case .managed:
+            return managedSignedIn
         case .ownR2:
             return !r2AccountID.isEmpty && !r2Bucket.isEmpty && !r2AccessKeyID.isEmpty && !r2SecretAccessKey.isEmpty
+        case .local:
+            return true
         }
     }
 
@@ -133,7 +188,8 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
                 mode: .managed,
                 managedBaseURL: base,
                 managedToken: token,
-                r2Signer: nil
+                r2Signer: nil,
+                localDirectory: nil
             )
         case .ownR2:
             guard !r2AccountID.isEmpty,
@@ -151,7 +207,16 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
                     bucket: r2Bucket,
                     accessKeyID: r2AccessKeyID,
                     secretAccessKey: r2SecretAccessKey
-                )
+                ),
+                localDirectory: nil
+            )
+        case .local:
+            return CloudStorageContext(
+                mode: .local,
+                managedBaseURL: nil,
+                managedToken: nil,
+                r2Signer: nil,
+                localDirectory: Self.recordingsDirectory()
             )
         }
     }
@@ -281,6 +346,21 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
                     // Completed objects remain journaled and are retried next
                     // launch; they are never deleted for a manifest failure.
                 }
+            }
+        }
+
+        for entry in entries where entry.backend == .local {
+            guard let upload = entry.upload else { continue }
+            do {
+                if entry.completedObjectKey == nil {
+                    let transport = LocalMediaStreamingTransport(
+                        directory: URL(fileURLWithPath: entry.storageScope, isDirectory: true)
+                    )
+                    try await transport.abortUpload(upload)
+                }
+                try await MediaStreamingUploadJournal.shared.remove(upload)
+            } catch {
+                // Keep the journal entry until the partial file can be removed.
             }
         }
     }
@@ -586,6 +666,11 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
     ) async throws {
         let context = try storageContext ?? captureStorageContext(for: storageMode)
         let selectedMode = context.mode
+        if selectedMode == .local {
+            // Meeting memory stays in the local Meetings index. Callers write
+            // that record themselves; this mode does not upload a transcript.
+            return
+        }
         if selectedMode == .ownR2 {
             // A BYO bucket is media + recoverable meeting metadata only. Keep
             // the raw transcript in this Mac's local library so it is never
@@ -695,6 +780,8 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
             if let audioURL {
                 try await uploadR2(fileURL: audioURL, objectKey: "\(prefix)/audio.\(audioURL.pathExtension)", signer: signer)
             }
+        case .local:
+            return
         }
     }
 
@@ -734,6 +821,11 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
                 throw OpenRecError.invalidConfiguration("The R2 recording context is unavailable.")
             }
             transport = OwnR2MediaStreamingTransport(signer: signer)
+        case .local:
+            guard let directory = context.localDirectory else {
+                throw OpenRecError.invalidConfiguration("The recordings folder on this Mac is unavailable.")
+            }
+            transport = LocalMediaStreamingTransport(directory: directory)
         }
         return try await MediaStreamingSession.begin(
             descriptor: descriptor,
@@ -857,6 +949,8 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
                 // locally; one with cloud media must not silently orphan it.
                 if meeting.hasScreenRecording || meeting.hasAudioRecording { throw error }
             }
+        case .local:
+            break
         }
 
         if let path = meeting.localScreenPath { try? FileManager.default.removeItem(atPath: path) }
@@ -866,6 +960,18 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
             try FileManager.default.removeItem(at: localURL)
         }
         libraryMeetings.removeAll { $0.id == meeting.id }
+        if meeting.storageMode == .local {
+            let folders = Set([meeting.localScreenPath, meeting.localAudioPath].compactMap { path -> String? in
+                guard let path else { return nil }
+                return URL(fileURLWithPath: path).deletingLastPathComponent().path
+            })
+            for folder in folders {
+                let remaining = (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? ["occupied"]
+                if remaining.isEmpty {
+                    try? FileManager.default.removeItem(atPath: folder)
+                }
+            }
+        }
     }
 
     private func mediaStreamingTransportSnapshot() throws -> any MediaStreamingTransport {
@@ -890,7 +996,23 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
                 throw OpenRecError.invalidConfiguration("The R2 recording context is unavailable.")
             }
             return OwnR2MediaStreamingTransport(signer: signer)
+        case .local:
+            guard let directory = context.localDirectory else {
+                throw OpenRecError.invalidConfiguration("The recordings folder on this Mac is unavailable.")
+            }
+            return LocalMediaStreamingTransport(directory: directory)
         }
+    }
+
+    func existingLocalMediaPath(
+        meetingID: UUID,
+        kind: MeetingMediaKind,
+        storageContext: CloudStorageContext
+    ) -> String? {
+        guard storageContext.mode == .local, let directory = storageContext.localDirectory else { return nil }
+        let url = LocalMediaStreamingTransport.finalURL(directory: directory, meetingID: meetingID, kind: kind)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url.path
     }
 
     private func uploadManaged(fileURL: URL, meetingID: UUID, kind: String) async throws {
@@ -1127,10 +1249,15 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
                 meeting.webhookErrorMessage = "Delivery was interrupted. Retry to confirm the external webhook received this meeting."
             } else if meeting.hasScreenRecording || meeting.hasAudioRecording {
                 meeting.saveStatus = .failed
-                meeting.errorMessage = "The recording is safe in cloud storage. Retry to finish transcription, retention, and meeting details."
+                meeting.errorMessage = meeting.storageMode == .local
+                    ? "The recording is saved on this Mac. Retry to finish transcription and meeting details."
+                    : "The recording is safe in cloud storage. Retry to finish transcription, retention, and meeting details."
             } else if meeting.localScreenURL != nil {
                 meeting.saveStatus = .failed
                 meeting.errorMessage = "Saving was interrupted. Retry to finish this meeting from its local recovery files."
+            } else if meeting.storageMode == .local {
+                meeting.saveStatus = .failed
+                meeting.errorMessage = "Saving was interrupted before a recording file was finalized on this Mac."
             } else {
                 meeting.saveStatus = .failed
                 meeting.errorMessage = "Cloud streaming stopped before a playable recording was finalized. No local recording was created."
@@ -1166,6 +1293,9 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
                     return
                 }
                 remote = try await fetchOwnR2Meetings()
+            case .local:
+                libraryMeetings = local.sorted { $0.startedAt > $1.startedAt }
+                return
             }
             libraryMeetings = merge(remote: remote, local: local)
         } catch {
@@ -1438,9 +1568,7 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
     }
 
     private func discoverLegacyRecordings() -> [MeetingRecord] {
-        let configured = UserDefaults.standard.string(forKey: "RecordingsDirectory").map(URL.init(fileURLWithPath:))
-        let directory = configured ?? FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("OpenRec", isDirectory: true)
+        let directory = Self.recordingsDirectory()
         guard let enumerator = FileManager.default.enumerator(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey],

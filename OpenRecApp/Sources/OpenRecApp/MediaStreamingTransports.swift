@@ -691,3 +691,143 @@ enum MediaStreamingRetry {
         }
     }
 }
+
+/// Writes the live capture pipeline's ordered multipart chunks to files on
+/// this Mac. Parts are appended in the order the session already resolved, so
+/// a fragmented MP4 / CMAF init segment stays ahead of the media fragments.
+struct LocalMediaStreamingTransport: MediaStreamingTransport {
+    let directory: URL
+
+    static func storageScope(_ directory: URL) -> String {
+        directory.standardizedFileURL.path
+    }
+
+    static func meetingDirectory(directory: URL, meetingID: UUID) -> URL {
+        directory.appendingPathComponent(meetingID.uuidString.lowercased(), isDirectory: true)
+    }
+
+    static func finalURL(directory: URL, meetingID: UUID, kind: MeetingMediaKind) -> URL {
+        let name = kind == .screen ? "screen.mp4" : "audio.m4a"
+        return meetingDirectory(directory: directory, meetingID: meetingID).appendingPathComponent(name)
+    }
+
+    static func partialURL(directory: URL, meetingID: UUID, kind: MeetingMediaKind) -> URL {
+        finalURL(directory: directory, meetingID: meetingID, kind: kind).appendingPathExtension("partial")
+    }
+
+    func prepareMeeting(_ descriptor: MediaStreamingMeetingDescriptor) async throws {
+        try FileManager.default.createDirectory(
+            at: Self.meetingDirectory(directory: directory, meetingID: descriptor.meetingID),
+            withIntermediateDirectories: true
+        )
+    }
+
+    func beginUpload(
+        meetingID: UUID,
+        kind: MeetingMediaKind,
+        contentType: String
+    ) async throws -> MediaMultipartUpload {
+        let folder = Self.meetingDirectory(directory: directory, meetingID: meetingID)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let partial = Self.partialURL(directory: directory, meetingID: meetingID, kind: kind)
+        if FileManager.default.fileExists(atPath: partial.path) {
+            try FileManager.default.removeItem(at: partial)
+        }
+        guard FileManager.default.createFile(atPath: partial.path, contents: nil) else {
+            throw OpenRecError.invalidConfiguration("OpenRec could not create a recording file on this Mac.")
+        }
+        return MediaMultipartUpload(
+            meetingID: meetingID,
+            kind: kind,
+            uploadID: UUID().uuidString.lowercased(),
+            objectKey: partial.path,
+            contentType: contentType,
+            backend: .local,
+            storageScope: Self.storageScope(directory)
+        )
+    }
+
+    func uploadPart(
+        _ data: Data,
+        partNumber: Int,
+        upload: MediaMultipartUpload
+    ) async throws -> MediaUploadedPart {
+        guard !data.isEmpty else {
+            throw OpenRecError.invalidResponse("A local recording part was empty.")
+        }
+        let url = URL(fileURLWithPath: upload.objectKey)
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        _ = try handle.seekToEnd()
+        try handle.write(contentsOf: data)
+        try handle.synchronize()
+        return MediaUploadedPart(partNumber: partNumber, etag: "local-\(partNumber)")
+    }
+
+    func completeUpload(
+        _ upload: MediaMultipartUpload,
+        parts: [MediaUploadedPart]
+    ) async throws -> MediaCompletedUpload {
+        let partial = URL(fileURLWithPath: upload.objectKey)
+        guard partial.pathExtension == "partial" else {
+            throw OpenRecError.invalidResponse("The local recording upload is not a partial file.")
+        }
+        guard FileManager.default.fileExists(atPath: partial.path) else {
+            throw OpenRecError.invalidResponse("The local recording file disappeared before it could be finalized.")
+        }
+        guard !parts.isEmpty else {
+            throw OpenRecError.invalidResponse("The local recording ended before any media was written.")
+        }
+        let finalURL = partial.deletingPathExtension()
+        if FileManager.default.fileExists(atPath: finalURL.path) {
+            try FileManager.default.removeItem(at: finalURL)
+        }
+        try FileManager.default.moveItem(at: partial, to: finalURL)
+        return MediaCompletedUpload(objectKey: finalURL.path)
+    }
+
+    func abortUpload(_ upload: MediaMultipartUpload) async throws {
+        let partial = URL(fileURLWithPath: upload.objectKey)
+        // Completion renames the partial away. A late abort must not delete
+        // the finished recording that replaced it.
+        guard partial.pathExtension == "partial" else { return }
+        if FileManager.default.fileExists(atPath: partial.path) {
+            try FileManager.default.removeItem(at: partial)
+        }
+    }
+
+    func deleteProvisionalMeeting(meetingID: UUID) async throws {
+        // This Mac has no remote meeting row. The local JSON index is removed
+        // by the caller that abandoned the recording.
+    }
+
+    func deleteMedia(meetingID: UUID, kind: MeetingMediaKind) async throws {
+        for url in [
+            Self.finalURL(directory: directory, meetingID: meetingID, kind: kind),
+            Self.partialURL(directory: directory, meetingID: meetingID, kind: kind),
+        ] where FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    func accessURL(
+        meetingID: UUID,
+        kind: MeetingMediaKind,
+        ttl: TimeInterval
+    ) async throws -> RemoteMediaAccess {
+        _ = ttl
+        let url = Self.finalURL(directory: directory, meetingID: meetingID, kind: kind)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw OpenRecError.invalidResponse("The \(kind.label.lowercased()) is not on this Mac.")
+        }
+        return RemoteMediaAccess(url: url, expiresAt: .distantFuture)
+    }
+
+    func commitManifest(
+        descriptor: MediaStreamingMeetingDescriptor,
+        media: [MediaStreamingMediaResult]
+    ) async throws {
+        // Meeting memory stays in the local Meetings index. There is no
+        // remote manifest to commit.
+    }
+}

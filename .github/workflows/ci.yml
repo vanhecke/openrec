@@ -12,6 +12,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build (unsigned)
         run: swift build --package-path OpenRecApp -c release
+      - name: Test
+        run: swift test --package-path OpenRecApp
 
   build-web:
     name: Build website

@@ -209,10 +209,19 @@ struct OpenRecSettingsView: View {
                     ) {
                         recorderManager.cloudStorage.mode = .ownR2
                     }
+                    StorageSettingsChoice(
+                        icon: "internaldrive",
+                        title: "This Mac",
+                        detail: "Recordings and meeting memory stay on this computer",
+                        selected: recorderManager.cloudStorage.mode == .local
+                    ) {
+                        recorderManager.cloudStorage.mode = .local
+                    }
                 }
             }
 
-            if recorderManager.cloudStorage.mode == .managed {
+            switch recorderManager.cloudStorage.mode {
+            case .managed:
                 SettingsCard(title: "OpenRec Cloud account") {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
@@ -257,7 +266,7 @@ struct OpenRecSettingsView: View {
                         }
                     }
                 }
-            } else {
+            case .ownR2:
                 SettingsCard(title: "Cloudflare R2 credentials") {
                     VStack(spacing: 9) {
                         HStack(spacing: 9) {
@@ -281,6 +290,24 @@ struct OpenRecSettingsView: View {
                         SettingsTestRow(state: r2Check, idleText: "Credentials are stored in Keychain") {
                             testR2()
                         }
+                    }
+                }
+            case .local:
+                SettingsCard(title: "Recordings folder") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text((recorderManager.cloudStorage.recordingsDirectoryPath as NSString).abbreviatingWithTildeInPath)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundColor(primary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("New screen and audio recordings are saved in this folder.")
+                            .font(.system(size: 10))
+                            .foregroundColor(secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Choose Folder…") {
+                            recorderManager.cloudStorage.chooseRecordingsDirectory()
+                        }
+                        .buttonStyle(SettingsButtonStyle(prominent: false))
                     }
                 }
             }
@@ -641,22 +668,41 @@ struct OpenRecSettingsView: View {
             }
 
             SettingsCard(title: "Capture storage") {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "icloud.and.arrow.up.fill")
-                        .foregroundColor(.red.opacity(0.9))
-                        .frame(width: 18)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Cloud-first recording")
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundColor(primary)
-                        Text("Media uploads while you record. OpenRec keeps no permanent recordings folder on this Mac.")
-                            .font(.system(size: 10))
-                            .foregroundColor(secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                if recorderManager.cloudStorage.mode == .local {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "internaldrive")
+                            .foregroundColor(.red.opacity(0.9))
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Saved on this Mac")
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundColor(primary)
+                            Text("Screen and audio files are saved on this Mac while you record. Meeting memory stays in the local meeting index.")
+                                .font(.system(size: 10))
+                                .foregroundColor(secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
                     }
-                    Spacer()
+                    .padding(.vertical, 3)
+                } else {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "icloud.and.arrow.up.fill")
+                            .foregroundColor(.red.opacity(0.9))
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Cloud-first recording")
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundColor(primary)
+                            Text("Media uploads while you record. OpenRec keeps no permanent recordings folder on this Mac.")
+                                .font(.system(size: 10))
+                                .foregroundColor(secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 3)
                 }
-                .padding(.vertical, 3)
             }
 
         }
@@ -667,7 +713,9 @@ struct OpenRecSettingsView: View {
             VStack(spacing: 10) {
                 SettingsToggleRow(
                     title: "Send completed calls",
-                    detail: "POST metadata with short-lived private recording links",
+                    detail: recorderManager.cloudStorage.mode == .local
+                        ? "POST meeting metadata. Recordings stay on this Mac and are not linked from the webhook."
+                        : "POST metadata with short-lived private recording links",
                     value: preference(\.sendToWebhook)
                 )
                 if recorderManager.callPreferences.sendToWebhook {

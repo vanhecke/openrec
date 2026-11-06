@@ -355,9 +355,14 @@ final class RecorderManager: ObservableObject {
             return
         }
         guard cloudStorage.isReady else {
-            lastErrorMessage = cloudStorage.mode == .managed
-                ? "Continue with Google before recording so the call has a cloud home."
-                : "Complete your R2 account, bucket, access key, and secret key before recording."
+            switch cloudStorage.mode {
+            case .managed:
+                lastErrorMessage = "Continue with Google before recording so the call has a cloud home."
+            case .ownR2:
+                lastErrorMessage = "Complete your R2 account, bucket, access key, and secret key before recording."
+            case .local:
+                lastErrorMessage = "Choose a recordings folder on this Mac before recording."
+            }
             return
         }
         if cloudStorage.mode == .managed && callPreferences.storeTranscriptInCloud && !cloudStorage.canStoreTranscriptInCloud {
@@ -806,7 +811,11 @@ final class RecorderManager: ObservableObject {
             meeting.updatedAt = Date()
             try cloudStorage.upsertLocalMeeting(meeting)
 
-            _ = try await mediaStreamingSession.finish()
+            let streamingResult = try await mediaStreamingSession.finish()
+            if storageContext.mode == .local {
+                meeting.localScreenPath = streamingResult.media.first(where: { $0.kind == .screen })?.objectKey
+                meeting.localAudioPath = streamingResult.media.first(where: { $0.kind == .audio })?.objectKey
+            }
             meeting.hasScreenRecording = true
             meeting.hasAudioRecording = true
             meeting.updatedAt = Date()
@@ -818,8 +827,15 @@ final class RecorderManager: ObservableObject {
             try cloudStorage.upsertLocalMeeting(meeting)
             var transcriptionFailure: Error?
             do {
-                let audioAccess = try await mediaStreamingSession.accessURL(for: .audio, ttl: 60 * 60)
-                try await transcriptionManager.transcribeCloudRecording(audioURL: audioAccess.url)
+                if storageContext.mode == .local {
+                    guard let audioURL = meeting.localAudioURL ?? meeting.localScreenURL else {
+                        throw OpenRecError.invalidResponse("The recording file on this Mac is missing.")
+                    }
+                    try await transcriptionManager.transcribeRecording(audioURL: audioURL)
+                } else {
+                    let audioAccess = try await mediaStreamingSession.accessURL(for: .audio, ttl: 60 * 60)
+                    try await transcriptionManager.transcribeCloudRecording(audioURL: audioAccess.url)
+                }
             } catch {
                 transcriptionFailure = error
                 warnings.append("Transcription failed: \(error.localizedDescription)")
@@ -907,20 +923,25 @@ final class RecorderManager: ObservableObject {
                     guard let webhookURL = URL(string: webhookSettings.url) else {
                         throw OpenRecError.invalidConfiguration("The webhook URL is invalid.")
                     }
-                    async let screenAccess = mediaStreamingSession.accessURL(
-                        for: .screen,
-                        ttl: Self.webhookMediaAccessLifetime
-                    )
-                    async let audioAccess = mediaStreamingSession.accessURL(
-                        for: .audio,
-                        ttl: Self.webhookMediaAccessLifetime
-                    )
-                    let access = try await (screenAccess, audioAccess)
-                    try await WebhookDeliveryService(url: webhookURL, secret: webhookSettings.secret).deliverCloud(
-                        payload: payload,
-                        screenURL: access.0.url,
-                        audioURL: access.1.url
-                    )
+                    let service = WebhookDeliveryService(url: webhookURL, secret: webhookSettings.secret)
+                    if storageContext.mode == .local {
+                        try await service.deliverCloud(payload: payload, screenURL: nil, audioURL: nil)
+                    } else {
+                        async let screenAccess = mediaStreamingSession.accessURL(
+                            for: .screen,
+                            ttl: Self.webhookMediaAccessLifetime
+                        )
+                        async let audioAccess = mediaStreamingSession.accessURL(
+                            for: .audio,
+                            ttl: Self.webhookMediaAccessLifetime
+                        )
+                        let access = try await (screenAccess, audioAccess)
+                        try await service.deliverCloud(
+                            payload: payload,
+                            screenURL: access.0.url,
+                            audioURL: access.1.url
+                        )
+                    }
                     meeting.webhookDeliveryStatus = .delivered
                 } catch {
                     preserveWebhookRecovery = true
@@ -930,7 +951,7 @@ final class RecorderManager: ObservableObject {
                 }
             }
 
-            if meeting.webhookDeliveryStatus == .delivered {
+            if meeting.webhookDeliveryStatus == .delivered, storageContext.mode != .local {
                 let cleanupAt = Date().addingTimeInterval(Self.webhookMediaCleanupGrace)
                 if !pendingPreferences.keepScreenRecording {
                     meeting.screenDeletionScheduledAt = cleanupAt
@@ -981,8 +1002,23 @@ final class RecorderManager: ObservableObject {
 
             meeting.hasScreenRecording = keepScreen
             meeting.hasAudioRecording = keepAudio
-            meeting.localScreenPath = nil
-            meeting.localAudioPath = nil
+            if storageContext.mode == .local {
+                var discardedFolders = Set<String>()
+                if !keepScreen, let path = meeting.localScreenPath {
+                    discardedFolders.insert(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+                    meeting.localScreenPath = nil
+                }
+                if !keepAudio, let path = meeting.localAudioPath {
+                    discardedFolders.insert(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+                    meeting.localAudioPath = nil
+                }
+                for folder in discardedFolders where (try? FileManager.default.contentsOfDirectory(atPath: folder))?.isEmpty == true {
+                    try? FileManager.default.removeItem(atPath: folder)
+                }
+            } else {
+                meeting.localScreenPath = nil
+                meeting.localAudioPath = nil
+            }
             meeting.saveStatus = .saved
             meeting.saveStage = .complete
             meeting.errorMessage = nil
@@ -993,15 +1029,35 @@ final class RecorderManager: ObservableObject {
             self.mediaStreamingSession = nil
             finishSuccessfulSave(meetingID: meetingID, warnings: warnings)
         } catch {
+            if storageContext.mode == .local {
+                if meeting.localScreenPath == nil {
+                    meeting.localScreenPath = cloudStorage.existingLocalMediaPath(
+                        meetingID: meetingID,
+                        kind: .screen,
+                        storageContext: storageContext
+                    )
+                }
+                if meeting.localAudioPath == nil {
+                    meeting.localAudioPath = cloudStorage.existingLocalMediaPath(
+                        meetingID: meetingID,
+                        kind: .audio,
+                        storageContext: storageContext
+                    )
+                }
+            }
             let completedKinds = await mediaStreamingSession.completedMediaKinds()
             let hasScreen = completedKinds.contains(.screen)
+                || (storageContext.mode == .local && meeting.localScreenPath != nil)
             let hasAudio = completedKinds.contains(.audio)
+                || (storageContext.mode == .local && meeting.localAudioPath != nil)
             if hasScreen || hasAudio {
                 await mediaStreamingSession.abort(deleteCompleted: false)
                 meeting.hasScreenRecording = hasScreen
                 meeting.hasAudioRecording = hasAudio
                 meeting.saveStatus = .failed
-                meeting.errorMessage = "The recording reached cloud storage, but meeting processing stopped: \(error.localizedDescription)"
+                meeting.errorMessage = storageContext.mode == .local
+                    ? "The recording is on this Mac, but meeting processing stopped: \(error.localizedDescription)"
+                    : "The recording reached cloud storage, but meeting processing stopped: \(error.localizedDescription)"
                 meeting.updatedAt = Date()
                 try? cloudStorage.upsertLocalMeeting(meeting)
                 self.mediaStreamingSession = nil
@@ -1049,14 +1105,22 @@ final class RecorderManager: ObservableObject {
             var transcriptionFailure: Error?
             if shouldAttemptTranscription {
                 do {
-                    let sourceKind: MeetingMediaKind = meeting.hasAudioRecording ? .audio : .screen
-                    let access = try await cloudStorage.accessURL(
-                        meetingID: meeting.id,
-                        kind: sourceKind,
-                        ttl: 60 * 60,
-                        storageContext: storageContext
-                    )
-                    try await transcriptionManager.transcribeCloudRecording(audioURL: access.url)
+                    if storageContext.mode == .local {
+                        let fileURL = meeting.localAudioURL ?? meeting.localScreenURL
+                        guard let fileURL else {
+                            throw OpenRecError.invalidResponse("The recording file on this Mac is missing.")
+                        }
+                        try await transcriptionManager.transcribeRecording(audioURL: fileURL)
+                    } else {
+                        let sourceKind: MeetingMediaKind = meeting.hasAudioRecording ? .audio : .screen
+                        let access = try await cloudStorage.accessURL(
+                            meetingID: meeting.id,
+                            kind: sourceKind,
+                            ttl: 60 * 60,
+                            storageContext: storageContext
+                        )
+                        try await transcriptionManager.transcribeCloudRecording(audioURL: access.url)
+                    }
                 } catch {
                     transcriptionFailure = error
                     warnings.append("Transcription failed: \(error.localizedDescription)")
@@ -1128,44 +1192,52 @@ final class RecorderManager: ObservableObject {
                     guard let webhookURL = URL(string: webhookSettings.url), webhookSettings.isConfigured else {
                         throw OpenRecError.invalidConfiguration("Configure the HTTPS webhook in Settings, then retry this meeting.")
                     }
-                    var media = try await cloudStorage.webhookMediaURLs(for: meeting, storageContext: storageContext)
-                    var resolved = [media.screen, media.audio].compactMap { $0 }
-                    if resolved.contains(where: \.isFileURL),
-                       resolved.contains(where: { !$0.isFileURL }) {
-                        let localScreen = media.screen?.isFileURL == true ? media.screen : nil
-                        let localAudio = media.audio?.isFileURL == true ? media.audio : nil
-                        try await cloudStorage.uploadMedia(
-                            meetingID: meeting.id,
-                            screenURL: localScreen,
-                            audioURL: localAudio,
-                            storageContext: storageContext
-                        )
-                        if localScreen != nil { meeting.hasScreenRecording = true }
-                        if localAudio != nil { meeting.hasAudioRecording = true }
-                        try await cloudStorage.saveMeeting(
-                            meeting.payload,
-                            includeTranscript: meeting.preferences.storeTranscriptInCloud,
-                            hasScreenRecording: meeting.hasScreenRecording,
-                            hasAudioRecording: meeting.hasAudioRecording,
-                            isFinal: false,
-                            storageContext: storageContext
-                        )
-                        media = try await cloudStorage.webhookMediaURLs(for: meeting, storageContext: storageContext)
-                        resolved = [media.screen, media.audio].compactMap { $0 }
-                    }
-                    let webhook = WebhookDeliveryService(url: webhookURL, secret: webhookSettings.secret)
-                    if resolved.allSatisfy({ !$0.isFileURL }) {
-                        try await webhook.deliverCloud(
+                    if storageContext.mode == .local {
+                        try await WebhookDeliveryService(url: webhookURL, secret: webhookSettings.secret).deliverCloud(
                             payload: meeting.payload,
-                            screenURL: media.screen,
-                            audioURL: media.audio
+                            screenURL: nil,
+                            audioURL: nil
                         )
                     } else {
-                        try await webhook.deliver(
-                            payload: meeting.payload,
-                            screenURL: media.screen,
-                            audioURL: media.audio
-                        )
+                        var media = try await cloudStorage.webhookMediaURLs(for: meeting, storageContext: storageContext)
+                        var resolved = [media.screen, media.audio].compactMap { $0 }
+                        if resolved.contains(where: \.isFileURL),
+                           resolved.contains(where: { !$0.isFileURL }) {
+                            let localScreen = media.screen?.isFileURL == true ? media.screen : nil
+                            let localAudio = media.audio?.isFileURL == true ? media.audio : nil
+                            try await cloudStorage.uploadMedia(
+                                meetingID: meeting.id,
+                                screenURL: localScreen,
+                                audioURL: localAudio,
+                                storageContext: storageContext
+                            )
+                            if localScreen != nil { meeting.hasScreenRecording = true }
+                            if localAudio != nil { meeting.hasAudioRecording = true }
+                            try await cloudStorage.saveMeeting(
+                                meeting.payload,
+                                includeTranscript: meeting.preferences.storeTranscriptInCloud,
+                                hasScreenRecording: meeting.hasScreenRecording,
+                                hasAudioRecording: meeting.hasAudioRecording,
+                                isFinal: false,
+                                storageContext: storageContext
+                            )
+                            media = try await cloudStorage.webhookMediaURLs(for: meeting, storageContext: storageContext)
+                            resolved = [media.screen, media.audio].compactMap { $0 }
+                        }
+                        let webhook = WebhookDeliveryService(url: webhookURL, secret: webhookSettings.secret)
+                        if resolved.allSatisfy({ !$0.isFileURL }) {
+                            try await webhook.deliverCloud(
+                                payload: meeting.payload,
+                                screenURL: media.screen,
+                                audioURL: media.audio
+                            )
+                        } else {
+                            try await webhook.deliver(
+                                payload: meeting.payload,
+                                screenURL: media.screen,
+                                audioURL: media.audio
+                            )
+                        }
                     }
                     meeting.webhookDeliveryStatus = .delivered
                     meeting.webhookErrorMessage = nil
@@ -1177,7 +1249,7 @@ final class RecorderManager: ObservableObject {
                 }
             }
 
-            if meeting.webhookDeliveryStatus == .delivered {
+            if meeting.webhookDeliveryStatus == .delivered, storageContext.mode != .local {
                 let cleanupAt = Date().addingTimeInterval(Self.webhookMediaCleanupGrace)
                 if !meeting.preferences.keepScreenRecording, meeting.hasScreenRecording {
                     meeting.screenDeletionScheduledAt = cleanupAt
@@ -1197,6 +1269,11 @@ final class RecorderManager: ObservableObject {
             )
             if meeting.hasScreenRecording, !keepScreen {
                 do {
+                    if storageContext.mode == .local,
+                       let path = meeting.localScreenPath,
+                       FileManager.default.fileExists(atPath: path) {
+                        try FileManager.default.removeItem(atPath: path)
+                    }
                     try await cloudStorage.deleteMedia(
                         meetingID: meeting.id,
                         kind: .screen,
@@ -1214,6 +1291,11 @@ final class RecorderManager: ObservableObject {
             )
             if meeting.hasAudioRecording, !keepAudio {
                 do {
+                    if storageContext.mode == .local,
+                       let path = meeting.localAudioPath,
+                       FileManager.default.fileExists(atPath: path) {
+                        try FileManager.default.removeItem(atPath: path)
+                    }
                     try await cloudStorage.deleteMedia(
                         meetingID: meeting.id,
                         kind: .audio,
@@ -1239,8 +1321,13 @@ final class RecorderManager: ObservableObject {
                 if !result.contains(value) { result.append(value) }
             }
             meeting.errorMessage = distinctWarnings.isEmpty ? nil : distinctWarnings.joined(separator: "\n")
-            meeting.localScreenPath = nil
-            meeting.localAudioPath = nil
+            if storageContext.mode == .local {
+                if !meeting.hasScreenRecording { meeting.localScreenPath = nil }
+                if !meeting.hasAudioRecording { meeting.localAudioPath = nil }
+            } else {
+                meeting.localScreenPath = nil
+                meeting.localAudioPath = nil
+            }
             meeting.updatedAt = Date()
             try cloudStorage.upsertLocalMeeting(meeting)
             scheduleDeferredMediaCleanup(for: meeting)
@@ -1756,6 +1843,55 @@ final class RecorderManager: ObservableObject {
             try? cloudStorage.upsertLocalMeeting(meeting)
             var webhookDelivered = false
             do {
+                if storageContext.mode == .local {
+                    try await WebhookDeliveryService(url: webhookURL, secret: webhookSettings.secret).deliverCloud(
+                        payload: meeting.payload,
+                        screenURL: nil,
+                        audioURL: nil
+                    )
+                    webhookDelivered = true
+                    meeting.webhookDeliveryStatus = .delivered
+                    meeting.webhookErrorMessage = nil
+                    if !meeting.preferences.keepScreenRecording {
+                        if let path = meeting.localScreenPath, FileManager.default.fileExists(atPath: path) {
+                            try FileManager.default.removeItem(atPath: path)
+                        }
+                        meeting.localScreenPath = nil
+                        meeting.hasScreenRecording = false
+                    }
+                    if !meeting.preferences.keepAudioRecording {
+                        if let path = meeting.localAudioPath, FileManager.default.fileExists(atPath: path) {
+                            try FileManager.default.removeItem(atPath: path)
+                        }
+                        meeting.localAudioPath = nil
+                        meeting.hasAudioRecording = false
+                    }
+                    let discardedFolders = Set([
+                        meeting.preferences.keepScreenRecording ? nil : record.localScreenPath,
+                        meeting.preferences.keepAudioRecording ? nil : record.localAudioPath,
+                    ].compactMap { path -> String? in
+                        guard let path else { return nil }
+                        return URL(fileURLWithPath: path).deletingLastPathComponent().path
+                    })
+                    for folder in discardedFolders where (try? FileManager.default.contentsOfDirectory(atPath: folder))?.isEmpty == true {
+                        try? FileManager.default.removeItem(atPath: folder)
+                    }
+                    meeting.updatedAt = Date()
+                    try await cloudStorage.saveMeeting(
+                        meeting.payload,
+                        includeTranscript: meeting.preferences.storeTranscriptInCloud,
+                        hasScreenRecording: meeting.hasScreenRecording,
+                        hasAudioRecording: meeting.hasAudioRecording,
+                        isFinal: true,
+                        storageContext: storageContext
+                    )
+                    try cloudStorage.upsertLocalMeeting(meeting)
+                    savePhase = .complete
+                    lastErrorMessage = nil
+                    isProcessing = false
+                    onProcessingComplete?()
+                    return
+                }
                 var media: WebhookMediaURLs
                 do {
                     media = try await cloudStorage.webhookMediaURLs(
@@ -1917,19 +2053,31 @@ final class RecorderManager: ObservableObject {
 
     var currentCallPreferences: CallPreferences { activeCallPreferences ?? callPreferences }
     var cloudUploadStatusText: String {
-        guard let progress = cloudUploadProgress else { return "Preparing cloud upload" }
+        let savingLocally = pendingStorageMode == .local
+        guard let progress = cloudUploadProgress else {
+            return savingLocally ? "Preparing this Mac’s recording" : "Preparing cloud upload"
+        }
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         if let error = progress.errorMessage { return error }
         if progress.pendingBytes > 0 {
             let buffered = formatter.string(fromByteCount: Int64(progress.pendingBytes))
             if progress.pendingFraction >= 0.9 {
-                return "Cloud connection is falling behind · \(buffered) buffered · recording will stop before memory becomes unbounded"
+                return savingLocally
+                    ? "This Mac is falling behind · \(buffered) buffered · recording will stop before memory becomes unbounded"
+                    : "Cloud connection is falling behind · \(buffered) buffered · recording will stop before memory becomes unbounded"
             }
             if progress.pendingFraction >= 0.7 {
-                return "Cloud connection is slow · \(buffered) buffered safely"
+                return savingLocally
+                    ? "Saving to this Mac is slow · \(buffered) buffered safely"
+                    : "Cloud connection is slow · \(buffered) buffered safely"
             }
-            return "Streaming · \(buffered) buffered"
+            return savingLocally
+                ? "Saving on this Mac · \(buffered) buffered"
+                : "Streaming · \(buffered) buffered"
+        }
+        if savingLocally {
+            return progress.uploadedBytes > 0 ? "Saving on this Mac · caught up" : "Saving on this Mac"
         }
         return progress.uploadedBytes > 0 ? "Streaming securely · caught up" : "Streaming securely"
     }
