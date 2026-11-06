@@ -427,6 +427,7 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
                 UserDefaults.standard.set(calendarEmails, forKey: "CalendarEmails")
             }
             await refreshCalendarConnectionStatus()
+            GoogleCalendarConnectPrompt.clearDeclined()
             return true
         } catch {
             statusMessage = error.localizedDescription

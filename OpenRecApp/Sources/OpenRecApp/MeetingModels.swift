@@ -672,6 +672,39 @@ struct MeetingMemoryCredentials: Equatable {
     }
 }
 
+/// Automatic "Connect Google Calendar" prompts.
+/// No Thanks, and Skip for now on the calendar step, store a decline.
+/// Settings still connects, and a successful connection clears the decline.
+enum GoogleCalendarConnectPrompt {
+    static let declinedDefaultsKey = "GoogleCalendarConnectDeclined"
+
+    static func isDeclined(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: declinedDefaultsKey)
+    }
+
+    static func decline(in defaults: UserDefaults = .standard) {
+        defaults.set(true, forKey: declinedDefaultsKey)
+    }
+
+    /// Called when Google Calendar connects, including from Settings.
+    static func clearDeclined(in defaults: UserDefaults = .standard) {
+        defaults.set(false, forKey: declinedDefaultsKey)
+    }
+
+    static func shouldShowAutomaticPrompt(declined: Bool, googleCalendarConnected: Bool) -> Bool {
+        !declined && !googleCalendarConnected
+    }
+
+    /// Skip for now. This Mac and signed-out OpenRec Cloud never offered the
+    /// Google button, so leaving that step must not record a decline.
+    static func shouldDeclineWhenSkippingCalendarStep(
+        offersGoogleCalendarConnect: Bool,
+        googleCalendarConnected: Bool
+    ) -> Bool {
+        offersGoogleCalendarConnect && !googleCalendarConnected
+    }
+}
+
 struct OnboardingReadiness: Equatable {
     var markedComplete: Bool
     var transcription: TranscriptionCredentials

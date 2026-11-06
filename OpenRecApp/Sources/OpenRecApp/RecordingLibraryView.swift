@@ -128,6 +128,7 @@ struct RecordingLibraryView: View {
     @State private var tabMovesForward = true
     @State private var adoptedEventID: String?
     @State private var localCalendarGranted = CalendarMeetingSuggester.accessGranted
+    @State private var googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
     @State private var searchText = ""
     @State private var selectedID: UUID?
     @State private var detail: MeetingRecord?
@@ -227,7 +228,11 @@ struct RecordingLibraryView: View {
             recorderManager.refreshUpcomingEvents()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
             if tab == .comingUp { recorderManager.refreshUpcomingEvents() }
+        }
+        .onChange(of: recorderManager.cloudStorage.calendarEmails) { _ in
+            googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
         }
         .onReceive(calendarRefreshTimer) { _ in
             if tab == .comingUp { recorderManager.refreshUpcomingEvents() }
@@ -334,7 +339,7 @@ struct RecordingLibraryView: View {
             }
             .clipped()
 
-            if tab == .comingUp {
+            if tab == .comingUp, showsCalendarSourcesBar {
                 calendarSourcesBar
             }
 
@@ -494,7 +499,7 @@ struct RecordingLibraryView: View {
     @ViewBuilder
     private var comingUpContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if recorderManager.cloudStorage.calendarEmails.isEmpty {
+            if showsGoogleCalendarConnectPrompt {
                 connectCalendarCard
                     .padding(.horizontal, 12)
                     .padding(.top, 2)
@@ -549,9 +554,17 @@ struct RecordingLibraryView: View {
         }
         .onAppear {
             localCalendarGranted = CalendarMeetingSuggester.accessGranted
+            googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
             recorderManager.refreshUpcomingEvents()
             Task { await recorderManager.cloudStorage.refreshCalendarConnectionStatus() }
         }
+    }
+
+    private var showsGoogleCalendarConnectPrompt: Bool {
+        GoogleCalendarConnectPrompt.shouldShowAutomaticPrompt(
+            declined: googleCalendarConnectDeclined,
+            googleCalendarConnected: !recorderManager.cloudStorage.calendarEmails.isEmpty
+        )
     }
 
     private var sourceRowDivider: some View {
@@ -559,9 +572,8 @@ struct RecordingLibraryView: View {
             .padding(.leading, 30)
     }
 
-    /// Pinned calendar-sources bar: one row per connected Google account
-    /// (additive — connect as many as needed, all merged into one list), plus
-    /// the Mac's calendars. Never scrolls away or depends on an empty state.
+    /// Pinned calendar-sources bar: connected Google accounts, a connect row
+    /// unless the user declined that prompt, and the Mac calendar control.
     private var calendarSourcesBar: some View {
         VStack(spacing: 0) {
             ForEach(recorderManager.cloudStorage.calendarEmails, id: \.self) { email in
@@ -581,23 +593,27 @@ struct RecordingLibraryView: View {
                 sourceRowDivider
             }
 
-            sourceRow(
-                icon: recorderManager.cloudStorage.calendarEmails.isEmpty ? "calendar.badge.plus" : "plus",
-                title: recorderManager.cloudStorage.calendarEmails.isEmpty
-                    ? "Google Calendar"
-                    : "Add another Google account",
-                value: recorderManager.cloudStorage.calendarEmails.isEmpty
-                    ? "Not connected"
-                    : "All accounts merge into one list",
-                actionTitle: recorderManager.cloudStorage.isConnectingCalendar ? "Opening…" : "Connect",
-                busy: recorderManager.cloudStorage.isConnectingCalendar,
-                help: "Grant read-only calendar access for any Google account — your meeting library stays on the account you signed in with."
-            ) {
-                connectGoogleCalendar()
+            if showsGoogleCalendarConnectRow {
+                sourceRow(
+                    icon: recorderManager.cloudStorage.calendarEmails.isEmpty ? "calendar.badge.plus" : "plus",
+                    title: recorderManager.cloudStorage.calendarEmails.isEmpty
+                        ? "Google Calendar"
+                        : "Add another Google account",
+                    value: recorderManager.cloudStorage.calendarEmails.isEmpty
+                        ? "Not connected"
+                        : "All accounts merge into one list",
+                    actionTitle: recorderManager.cloudStorage.isConnectingCalendar ? "Opening…" : "Connect",
+                    busy: recorderManager.cloudStorage.isConnectingCalendar,
+                    help: "Grant read-only calendar access for any Google account — your meeting library stays on the account you signed in with."
+                ) {
+                    connectGoogleCalendar()
+                }
             }
 
             if !localCalendarGranted {
-                sourceRowDivider
+                if showsGoogleCalendarConnectRow || !recorderManager.cloudStorage.calendarEmails.isEmpty {
+                    sourceRowDivider
+                }
                 sourceRow(
                     icon: "desktopcomputer",
                     title: "Mac calendars",
@@ -679,15 +695,22 @@ struct RecordingLibraryView: View {
                 .foregroundColor(Color.white.opacity(0.52))
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(
-                recorderManager.cloudStorage.isConnectingCalendar
-                    ? "Opening Google…"
-                    : "Connect Google Calendar"
-            ) {
-                connectGoogleCalendar()
+            HStack(spacing: 8) {
+                Button(
+                    recorderManager.cloudStorage.isConnectingCalendar
+                        ? "Opening Google…"
+                        : "Connect Google Calendar"
+                ) {
+                    connectGoogleCalendar()
+                }
+                .buttonStyle(LibraryButtonStyle(prominent: true))
+                .disabled(recorderManager.cloudStorage.isConnectingCalendar)
+                Button("No Thanks") {
+                    GoogleCalendarConnectPrompt.decline()
+                    googleCalendarConnectDeclined = true
+                }
+                .buttonStyle(LibraryButtonStyle(prominent: false))
             }
-            .buttonStyle(LibraryButtonStyle(prominent: true))
-            .disabled(recorderManager.cloudStorage.isConnectingCalendar)
             .padding(.top, 3)
         }
         .padding(12)
@@ -702,10 +725,19 @@ struct RecordingLibraryView: View {
         )
     }
 
+    private var showsGoogleCalendarConnectRow: Bool {
+        !recorderManager.cloudStorage.calendarEmails.isEmpty || showsGoogleCalendarConnectPrompt
+    }
+
+    private var showsCalendarSourcesBar: Bool {
+        showsGoogleCalendarConnectRow || !localCalendarGranted
+    }
+
     private func connectGoogleCalendar() {
         if recorderManager.cloudStorage.mode == .managed && recorderManager.cloudStorage.isManagedSignedIn {
             Task {
                 if await recorderManager.cloudStorage.connectGoogleCalendar() {
+                    googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
                     recorderManager.refreshUpcomingEvents()
                 }
             }
