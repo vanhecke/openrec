@@ -100,8 +100,6 @@ struct GrokService {
             "model": MeetingMemoryProvider.grok.modelID,
             // Low effort keeps this on the fast path, analogous to gpt-5-mini.
             "reasoning_effort": "low",
-            // Meeting memory must stay inside the transcript.
-            "search_parameters": ["mode": "off"],
             "messages": [system, user],
             "response_format": responseFormat,
         ]

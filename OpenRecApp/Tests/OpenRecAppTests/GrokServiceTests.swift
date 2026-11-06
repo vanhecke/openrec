@@ -40,7 +40,6 @@ final class GrokServiceTests: XCTestCase {
         let responseFormat = body?["response_format"] as? [String: Any]
         let schema = responseFormat?["json_schema"] as? [String: Any]
         let inner = schema?["schema"] as? [String: Any]
-        let search = body?["search_parameters"] as? [String: Any]
         let messages = body?["messages"] as? [[String: Any]]
 
         XCTAssertEqual(request.httpMethod, "POST")
@@ -49,7 +48,7 @@ final class GrokServiceTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
         XCTAssertEqual(body?["model"] as? String, "grok-4.3")
         XCTAssertEqual(body?["reasoning_effort"] as? String, "low")
-        XCTAssertEqual(search?["mode"] as? String, "off")
+        XCTAssertNil(body?["search_parameters"])
         XCTAssertEqual(responseFormat?["type"] as? String, "json_schema")
         XCTAssertEqual(schema?["name"] as? String, "meeting_insights")
         XCTAssertEqual(schema?["strict"] as? Bool, true)
