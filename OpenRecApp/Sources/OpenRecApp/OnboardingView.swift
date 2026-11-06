@@ -94,6 +94,7 @@ struct OpenRecOnboardingView: View {
     @StateObject private var grokKeyVerifier = APIKeyAutoVerifier()
     @State private var localCalendarGranted = CalendarMeetingSuggester.accessGranted
     @State private var isRequestingLocalCalendar = false
+    @State private var googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
 
     init(
         recorderManager: RecorderManager,
@@ -651,14 +652,38 @@ struct OpenRecOnboardingView: View {
                             title: "Google Calendar connected",
                             detail: calendarEmail
                         )
-                    } else if recorderManager.cloudStorage.isManagedSignedIn {
-                        OnboardingPrimaryButton(
-                            title: recorderManager.cloudStorage.isConnectingCalendar ? "Opening Google…" : "Connect Google Calendar",
-                            icon: "calendar.badge.plus",
-                            disabled: recorderManager.cloudStorage.isConnectingCalendar
-                        ) {
-                            Task { _ = await recorderManager.cloudStorage.connectGoogleCalendar() }
+                    } else if showsGoogleCalendarConnectPrompt {
+                        HStack(spacing: 8) {
+                            OnboardingPrimaryButton(
+                                title: recorderManager.cloudStorage.isConnectingCalendar ? "Opening Google…" : "Connect Google Calendar",
+                                icon: "calendar.badge.plus",
+                                disabled: recorderManager.cloudStorage.isConnectingCalendar
+                            ) {
+                                Task {
+                                    if await recorderManager.cloudStorage.connectGoogleCalendar() {
+                                        googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
+                                    }
+                                }
+                            }
+                            Button("No Thanks") {
+                                declineGoogleCalendarConnect()
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.78))
+                            .padding(.horizontal, 14)
+                            .frame(height: 34)
+                            .background(Color.white.opacity(0.08))
+                            .cornerRadius(8)
+                            .fixedSize(horizontal: true, vertical: false)
                         }
+                    } else if recorderManager.cloudStorage.isManagedSignedIn {
+                        calendarStatusRow(
+                            icon: "calendar",
+                            tint: .white.opacity(0.5),
+                            title: "Google Calendar not connected",
+                            detail: "Connect it later in Settings"
+                        )
                     } else {
                         calendarStatusRow(
                             icon: "info.circle",
@@ -1002,7 +1027,11 @@ struct OpenRecOnboardingView: View {
         case .assemblyAI: move(to: .meetingMemory)
         case .meetingMemory: move(to: .storage)
         case .storage: move(to: .calendar)
-        case .calendar: move(to: .defaults)
+        case .calendar:
+            if !calendarConnected {
+                declineGoogleCalendarConnectIfOffered()
+            }
+            move(to: .defaults)
         case .defaults: move(to: .webhook)
         case .webhook: move(to: .permissions)
         case .permissions: move(to: .ready)
@@ -1030,6 +1059,34 @@ struct OpenRecOnboardingView: View {
             step = nextStep
         }
         if nextStep == .permissions { refreshPermissions() }
+        if nextStep == .calendar {
+            googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
+        }
+    }
+
+    private var showsGoogleCalendarConnectPrompt: Bool {
+        recorderManager.cloudStorage.mode == .managed
+            && recorderManager.cloudStorage.isManagedSignedIn
+            && GoogleCalendarConnectPrompt.shouldShowAutomaticPrompt(
+                declined: googleCalendarConnectDeclined,
+                googleCalendarConnected: recorderManager.cloudStorage.calendarEmail != nil
+            )
+    }
+
+    private func declineGoogleCalendarConnect() {
+        GoogleCalendarConnectPrompt.decline()
+        googleCalendarConnectDeclined = true
+    }
+
+    /// Skip for now records the same decline as No Thanks when OpenRec Cloud
+    /// offered Google Calendar and it is still not connected.
+    private func declineGoogleCalendarConnectIfOffered() {
+        guard GoogleCalendarConnectPrompt.shouldDeclineWhenSkippingCalendarStep(
+            offersGoogleCalendarConnect: recorderManager.cloudStorage.mode == .managed
+                && recorderManager.cloudStorage.isManagedSignedIn,
+            googleCalendarConnected: recorderManager.cloudStorage.calendarEmail != nil
+        ) else { return }
+        declineGoogleCalendarConnect()
     }
 
     private func selectStorage(_ mode: StorageMode) {
@@ -1066,6 +1123,7 @@ struct OpenRecOnboardingView: View {
         if UserDefaults.standard.bool(forKey: "R2ConnectionVerified"), recorderManager.cloudStorage.isReady {
             r2Check = .success("Upload and cleanup succeeded")
         }
+        googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
     }
 
     private func assemblyAIKeyChanged(to key: String) {
