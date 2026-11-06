@@ -3,6 +3,7 @@ import XCTest
 @testable import OpenRecApp
 
 final class LocalStorageModeTests: XCTestCase {
+    @MainActor
     func testLocalModeIsReadyWithoutCredentialsAndExistingModesAreUnchanged() {
         XCTAssertTrue(CloudStorageManager.storageIsReady(
             mode: .local,
@@ -57,7 +58,8 @@ final class LocalStorageModeTests: XCTestCase {
         XCTAssertEqual(StorageMode.local.label, "This Mac")
     }
 
-    func testSelectingThisMacDoesNotRequireR2OrGoogle() async {
+    @MainActor
+    func testSelectingThisMacDoesNotRequireR2OrGoogle() async throws {
         XCTAssertTrue(StorageMode.local.onboardingCanContinue(isReady: true, r2ConnectionVerified: false))
         XCTAssertTrue(StorageMode.managed.onboardingCanContinue(isReady: true, r2ConnectionVerified: false))
         XCTAssertFalse(StorageMode.managed.onboardingCanContinue(isReady: false, r2ConnectionVerified: true))
@@ -74,15 +76,14 @@ final class LocalStorageModeTests: XCTestCase {
             }
         }
 
-        let mode = try await MainActor.run { () throws -> StorageMode in
-            let manager = CloudStorageManager()
-            manager.mode = .local
-            XCTAssertTrue(manager.isReady)
-            return try manager.captureStorageContext(for: .local).mode
-        }
+        let manager = CloudStorageManager()
+        manager.mode = .local
+        XCTAssertTrue(manager.isReady)
+        let mode = try manager.captureStorageContext(for: .local).mode
         XCTAssertEqual(mode, .local)
     }
 
+    @MainActor
     func testRecordingsDirectoryHonorsTheExistingUserDefaultsKey() {
         let suiteName = "openrec.local-storage.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -206,6 +207,7 @@ final class LocalStorageModeTests: XCTestCase {
         XCTAssertEqual(ownR2.callTitle, "Weekly product review")
     }
 
+    @MainActor
     func testDeleteRemovesLocalMediaFilesAndTheJSONRecord() async throws {
         let root = try makeRoot()
         let meetingID = UUID()
@@ -222,13 +224,10 @@ final class LocalStorageModeTests: XCTestCase {
             localAudioPath: audio.path
         )
 
-        let manager = await MainActor.run { CloudStorageManager() }
-        try await MainActor.run {
-            try manager.upsertLocalMeeting(record)
-        }
+        let manager = CloudStorageManager()
+        try manager.upsertLocalMeeting(record)
         try await manager.deleteMeeting(record)
-        let leftover = await MainActor.run { manager.localMeeting(id: meetingID) }
-        XCTAssertNil(leftover)
+        XCTAssertNil(manager.localMeeting(id: meetingID))
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: screen.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: audio.path))
