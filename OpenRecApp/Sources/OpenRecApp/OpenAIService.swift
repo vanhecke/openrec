@@ -45,23 +45,20 @@ struct OpenAIService {
         return try JSONDecoder().decode(MeetingInsights.self, from: contentData)
     }
 
-    func makeInsightsRequest(transcript: String, callTitle: String?) throws -> URLRequest {
-        let prompt = """
-        Turn this meeting transcript into concise, factual meeting memory. Infer participant names only when the transcript explicitly supports them. Never invent names, owners, dates, or decisions. Return JSON matching the provided schema. Suggested title from the call window: \(callTitle ?? "none").
-
-        Lines begin with a bracketed speaker label. When that label is a person's name, use it for participants, decisions, and next-step owners.
-
-        For "aiNotes", write markdown notes the way a sharp human note-taker would capture the call as it happened: short "## " section headers that follow the conversation's actual topics, tight "- " bullet fragments underneath (not full prose sentences), with concrete specifics preserved — names, numbers, prices, tools, dates, and memorable quotes worth keeping. Bold the load-bearing terms. Keep it scannable; no filler, no meta commentary about the transcript.
-
-        For "summary", write 2-3 plain sentences of what the call was about and where it landed.
-
-        Transcript:
-        \(transcript)
-        """
+    func makeInsightsRequest(
+        transcript: String,
+        callTitle: String?,
+        defaults: UserDefaults = .standard
+    ) throws -> URLRequest {
+        let prompt = AIPromptStore.meetingMemoryUser(
+            transcript: transcript,
+            callTitle: callTitle,
+            defaults: defaults
+        )
         let body: [String: Any] = [
             "model": MeetingMemoryProvider.openai.modelID,
             "messages": [
-                ["role": "system", "content": "You take meeting notes like an excellent human note-taker, and extract participants, decisions, and concrete next steps."],
+                ["role": "system", "content": AIPromptStore.meetingMemorySystem(defaults: defaults)],
                 ["role": "user", "content": prompt],
             ],
             "response_format": [
@@ -100,12 +97,17 @@ struct OpenAIService {
         return try chatRequest(body: body)
     }
 
-    func makeSpeakerNamesRequest(transcript: String, callTitle: String?) throws -> URLRequest {
+    func makeSpeakerNamesRequest(
+        transcript: String,
+        callTitle: String?,
+        defaults: UserDefaults = .standard
+    ) throws -> URLRequest {
         let body = SpeakerNames.requestBody(
             model: MeetingMemoryProvider.openai.modelID,
             reasoningEffort: nil,
             transcript: transcript,
-            callTitle: callTitle
+            callTitle: callTitle,
+            defaults: defaults
         )
         return try chatRequest(body: body)
     }
