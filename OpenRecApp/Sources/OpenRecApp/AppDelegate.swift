@@ -49,11 +49,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
-        if let button = statusItem.button {
-            updateStatusIcon(isRecording: false)
-            button.action = #selector(showControlWindow)
-            button.target = self
-        }
+        updateStatusIcon(isRecording: false)
+        installStatusMenu()
 
         // Observe recording state changes to update icon and resize
         recorderManager.onRecordingStateChange = { [weak self] isRecording in
@@ -183,6 +180,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    /// The recorder hides into the menu bar, so closing the last window must not quit.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if recorderManager.isStarting {
             pendingTerminate = true
@@ -204,6 +206,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
     }
 
+    private func installStatusMenu() {
+        let menu = StatusItemMenu.makeMenu(snapshot: currentStatusSnapshot(), target: self)
+        menu.delegate = self
+        statusItem.menu = menu
+    }
+
+    private func currentStatusSnapshot() -> StatusItemMenuSnapshot {
+        StatusItemMenuSnapshot(
+            recorderVisible: controlWindow?.isVisible == true && controlWindow?.isMiniaturized != true,
+            isRecording: recorderManager.isRecording,
+            isStarting: recorderManager.isStarting,
+            isProcessing: recorderManager.isProcessing,
+            onboardingComplete: OpenRecOnboarding.isComplete
+        )
+    }
+
     private func updateStatusIcon(isRecording: Bool) {
         guard let button = statusItem.button else { return }
 
@@ -218,7 +236,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         button.setAccessibilityLabel(description)
     }
 
-    @objc private func showControlWindow() {
+    @objc fileprivate func showControlWindow() {
         guard OpenRecOnboarding.isComplete else {
             showOnboarding(isSettings: false)
             return
@@ -228,9 +246,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showRecorderWindow() {
         guard let window = controlWindow else { return }
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        configureTrafficLights(for: window)
         recorderManager.refreshMeetingNameSuggestion()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc fileprivate func hideControlWindow() {
+        controlWindow?.orderOut(nil)
+    }
+
+    @objc fileprivate func toggleRecordingFromStatusMenu() {
+        guard OpenRecOnboarding.isComplete else {
+            showOnboarding(isSettings: false)
+            return
+        }
+        showRecorderWindow()
+        if recorderManager.isRecording {
+            recorderManager.stopRecording()
+            return
+        }
+        guard !recorderManager.isProcessing, !recorderManager.isStarting else { return }
+        Task { await recorderManager.startRecording() }
+    }
+
+    /// Cmd-W. Hiding the recorder orders it out; every other window closes normally.
+    @objc private func closeFrontWindow(_ sender: Any?) {
+        guard let window = NSApp.keyWindow else { return }
+        if window === controlWindow {
+            window.orderOut(nil)
+            return
+        }
+        window.performClose(sender)
     }
 
     private func setupControlWindow() {
@@ -272,10 +322,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         )
 
-        configureTrafficLights(for: window)
-
-        window.center()
         controlWindow = window
+        window.delegate = self
+        configureTrafficLights(for: window)
+        window.center()
     }
 
     private func showOnboarding(isSettings: Bool) {
@@ -358,7 +408,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         callDetectorStarted = false
     }
 
-    @objc private func showRecordingsLibrary() {
+    @objc fileprivate func showRecordingsLibrary() {
         presentRecordingsLibrary(focusLastSaved: false)
     }
 
@@ -531,18 +581,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
+        let windowMenuItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        let closeWindow = windowMenu.addItem(
+            withTitle: "Close",
+            action: #selector(closeFrontWindow),
+            keyEquivalent: "w"
+        )
+        closeWindow.target = self
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+
         NSApp.mainMenu = mainMenu
     }
 
-    @objc private func openSettingsFromMenu() {
+    @objc fileprivate func openSettingsFromMenu() {
         showSettingsWindow()
     }
 
+    /// Close stays visible so hiding the recorder into the menu bar is a normal
+    /// window action. Miniaturize and zoom stay hidden on this compact panel.
     private func configureTrafficLights(for window: NSWindow) {
-        let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
-        for buttonType in buttons {
-            window.standardWindowButton(buttonType)?.isHidden = true
-        }
+        let closeButton = window.standardWindowButton(.closeButton)
+        closeButton?.isHidden = false
+        closeButton?.toolTip = "Hide OpenRec"
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
     }
 
     private func checkForUpdatesOnLaunch() {
@@ -566,6 +630,127 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     )
                 }
             }
+        }
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let statusMenu = statusItem.menu, menu === statusMenu else { return }
+        StatusItemMenu.populate(menu, snapshot: currentStatusSnapshot(), target: self)
+    }
+}
+
+extension AppDelegate: NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === controlWindow else { return true }
+        sender.orderOut(nil)
+        return false
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === controlWindow else { return }
+        configureTrafficLights(for: window)
+    }
+}
+
+struct StatusItemMenuSnapshot: Equatable {
+    var recorderVisible: Bool
+    var isRecording: Bool
+    var isStarting: Bool
+    var isProcessing: Bool
+    var onboardingComplete: Bool
+}
+
+enum StatusItemMenuAction: Equatable {
+    case showRecorder
+    case hideRecorder
+    case toggleRecording
+    case meetings
+    case settings
+    case quit
+}
+
+enum StatusItemMenuEntry: Equatable {
+    case action(title: String, action: StatusItemMenuAction, isEnabled: Bool)
+    case separator
+}
+
+@MainActor
+enum StatusItemMenu {
+    static func entries(for snapshot: StatusItemMenuSnapshot) -> [StatusItemMenuEntry] {
+        var entries: [StatusItemMenuEntry] = []
+        if snapshot.recorderVisible {
+            entries.append(.action(title: "Hide OpenRec", action: .hideRecorder, isEnabled: true))
+        } else {
+            entries.append(.action(title: "Open OpenRec", action: .showRecorder, isEnabled: true))
+        }
+
+        if snapshot.isRecording {
+            entries.append(.action(title: "Stop Recording", action: .toggleRecording, isEnabled: true))
+        } else {
+            let canStart = snapshot.onboardingComplete && !snapshot.isStarting && !snapshot.isProcessing
+            entries.append(.action(title: "Start Recording", action: .toggleRecording, isEnabled: canStart))
+        }
+
+        entries.append(.separator)
+        entries.append(.action(title: "Meetings…", action: .meetings, isEnabled: true))
+        let settingsEnabled = !snapshot.isRecording && !snapshot.isProcessing
+        entries.append(.action(title: "Settings…", action: .settings, isEnabled: settingsEnabled))
+        entries.append(.separator)
+        entries.append(.action(title: "Quit OpenRec", action: .quit, isEnabled: true))
+        return entries
+    }
+
+    static func makeMenu(snapshot: StatusItemMenuSnapshot, target: AnyObject) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        populate(menu, snapshot: snapshot, target: target)
+        return menu
+    }
+
+    static func populate(_ menu: NSMenu, snapshot: StatusItemMenuSnapshot, target: AnyObject) {
+        menu.removeAllItems()
+        for entry in entries(for: snapshot) {
+            menu.addItem(makeItem(for: entry, target: target))
+        }
+    }
+
+    private static func makeItem(for entry: StatusItemMenuEntry, target: AnyObject) -> NSMenuItem {
+        switch entry {
+        case .separator:
+            return .separator()
+        case .action(let title, let action, let isEnabled):
+            let item = NSMenuItem(title: title, action: selector(for: action), keyEquivalent: "")
+            item.target = itemTarget(for: action, owner: target)
+            item.isEnabled = isEnabled
+            return item
+        }
+    }
+
+    private static func selector(for action: StatusItemMenuAction) -> Selector {
+        switch action {
+        case .showRecorder:
+            return #selector(AppDelegate.showControlWindow)
+        case .hideRecorder:
+            return #selector(AppDelegate.hideControlWindow)
+        case .toggleRecording:
+            return #selector(AppDelegate.toggleRecordingFromStatusMenu)
+        case .meetings:
+            return #selector(AppDelegate.showRecordingsLibrary)
+        case .settings:
+            return #selector(AppDelegate.openSettingsFromMenu)
+        case .quit:
+            return #selector(NSApplication.terminate(_:))
+        }
+    }
+
+    private static func itemTarget(for action: StatusItemMenuAction, owner: AnyObject) -> AnyObject {
+        switch action {
+        case .quit:
+            return NSApp
+        case .showRecorder, .hideRecorder, .toggleRecording, .meetings, .settings:
+            return owner
         }
     }
 }

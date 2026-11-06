@@ -170,7 +170,10 @@ private struct HeaderView: View {
             .foregroundColor(.white.opacity(hoveringQuit ? 1 : 0.66))
             .onHover { hoveringQuit = $0 }
         }
-        .padding(.horizontal, 12)
+        // The close button sits in the transparent titlebar, over the leading
+        // edge of this row. Inset the title so it clears that one control.
+        .padding(.leading, 36)
+        .padding(.trailing, 12)
         .padding(.vertical, 8)
     }
 }
