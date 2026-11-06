@@ -17,7 +17,7 @@ The app is signed and notarized by Apple.
 - Keeps no permanent recordings folder or full recording file on the Mac for new calls
 - Uses 5 MiB multipart uploads with a strict 96 MiB in-memory backlog limit
 - Per-call video, audio, transcript-sync, and webhook retention controls
-- AssemblyAI Universal-3.5 Pro transcription (with automatic Universal-2 fallback for other languages) and speaker diarization using your own AssemblyAI API key
+- AssemblyAI Universal-3.5 Pro transcription (with automatic Universal-2 fallback for other languages) or Grok speech-to-text, both with speaker diarization, using your own API key
 - Google sign-in for managed R2/D1 storage or direct upload to your own R2 bucket
 - Call detection for Meet, Zoom, Teams, Slack Huddles, FaceTime, Webex, and more
 - Participant, decision, summary, and next-step extraction
@@ -39,7 +39,7 @@ The app is signed and notarized by Apple.
 
 OpenRec opens a focused onboarding flow before showing the recorder. It walks through:
 
-- Your AssemblyAI key for transcription and OpenAI key for meeting memory, both stored in the macOS Keychain
+- AssemblyAI or Grok for transcription, and OpenAI or Grok for meeting memory. A single Grok key covers both when Grok is selected for each. Keys stay in the macOS Keychain
 - OpenRec Cloud with Google sign-in, or your own Cloudflare R2 bucket
 - Default recording and transcript retention
 - An optional external webhook

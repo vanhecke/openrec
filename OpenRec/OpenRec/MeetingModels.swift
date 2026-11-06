@@ -238,6 +238,222 @@ struct MeetingRecord: Codable, Identifiable, Equatable {
     }
 }
 
+/// Which provider transcribes and diarizes the recording.
+/// An absent or unknown stored value stays on AssemblyAI so existing installs
+/// keep their current transcription key and path.
+enum TranscriptionProvider: String, CaseIterable, Identifiable {
+    case assemblyAI
+    case grok
+
+    static let defaultsKey = "TranscriptionProvider"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .assemblyAI: return "AssemblyAI"
+        case .grok: return "Grok"
+        }
+    }
+
+    var modelLabel: String {
+        switch self {
+        case .assemblyAI: return "Universal-3.5 Pro"
+        case .grok: return "grok-voice-transcribe-2.0"
+        }
+    }
+
+    var missingKeySettingsMessage: String {
+        switch self {
+        case .assemblyAI:
+            return "Open Settings and add your AssemblyAI API key before recording."
+        case .grok:
+            return "Open Settings and add your Grok API key before recording."
+        }
+    }
+
+    var unverifiedKeySettingsMessage: String {
+        switch self {
+        case .assemblyAI:
+            return "Open Settings and test your AssemblyAI API key before recording."
+        case .grok:
+            return "Open Settings and test your Grok API key before recording."
+        }
+    }
+
+    var missingKeyConfigurationMessage: String {
+        switch self {
+        case .assemblyAI:
+            return "Add your AssemblyAI API key before recording."
+        case .grok:
+            return "Add your Grok API key before recording."
+        }
+    }
+
+    static func resolved(from stored: String?) -> TranscriptionProvider {
+        guard let stored, let provider = TranscriptionProvider(rawValue: stored) else {
+            return .assemblyAI
+        }
+        return provider
+    }
+}
+
+struct TranscriptionCredentials: Equatable {
+    var provider: TranscriptionProvider
+    var assemblyKey: String
+    var assemblyVerified: Bool
+    var grokKey: String
+    var grokVerified: Bool
+
+    var selectedKey: String {
+        switch provider {
+        case .assemblyAI: return assemblyKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .grok: return grokKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    var hasSelectedKey: Bool { !selectedKey.isEmpty }
+
+    var isSelectedKeyVerified: Bool {
+        guard hasSelectedKey else { return false }
+        switch provider {
+        case .assemblyAI: return assemblyVerified
+        case .grok: return grokVerified
+        }
+    }
+}
+
+/// Which provider writes meeting memory after transcription.
+/// An absent or unknown stored value stays on OpenAI so existing installs
+/// keep their current key, onboarding, and analyze path.
+enum MeetingMemoryProvider: String, CaseIterable, Identifiable {
+    case openai
+    case grok
+
+    static let defaultsKey = "MeetingMemoryProvider"
+    static let openAIKeychainAccount = "openai-api-key"
+    static let grokKeychainAccount = "xai-api-key"
+    static let openAIVerifiedDefaultsKey = "OpenAIKeyVerified"
+    static let grokVerifiedDefaultsKey = "XAIKeyVerified"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .openai: return "OpenAI"
+        case .grok: return "Grok"
+        }
+    }
+
+    /// Fast model used for summaries, decisions, and next steps.
+    /// grok-4.3 is the current fast Grok model and the analog of gpt-5-mini.
+    var modelID: String {
+        switch self {
+        case .openai: return "gpt-5-mini"
+        case .grok: return "grok-4.3"
+        }
+    }
+
+    var keychainAccount: String {
+        switch self {
+        case .openai: return Self.openAIKeychainAccount
+        case .grok: return Self.grokKeychainAccount
+        }
+    }
+
+    var verifiedDefaultsKey: String {
+        switch self {
+        case .openai: return Self.openAIVerifiedDefaultsKey
+        case .grok: return Self.grokVerifiedDefaultsKey
+        }
+    }
+
+    var consoleURL: URL {
+        switch self {
+        case .openai: return URL(string: "https://platform.openai.com/api-keys")!
+        case .grok: return URL(string: "https://console.x.ai/")!
+        }
+    }
+
+    var keyPlaceholder: String {
+        switch self {
+        case .openai: return "sk-proj-…"
+        case .grok: return "xai-…"
+        }
+    }
+
+    var missingKeySettingsMessage: String {
+        switch self {
+        case .openai:
+            return "Open Settings and add your OpenAI API key for meeting summaries and next steps."
+        case .grok:
+            return "Open Settings and add your Grok API key for meeting summaries and next steps."
+        }
+    }
+
+    var unverifiedKeySettingsMessage: String {
+        switch self {
+        case .openai:
+            return "Open Settings and test your OpenAI API key before recording."
+        case .grok:
+            return "Open Settings and test your Grok API key before recording."
+        }
+    }
+
+    var missingKeyConfigurationMessage: String {
+        switch self {
+        case .openai:
+            return "Add your OpenAI API key to generate meeting memory."
+        case .grok:
+            return "Add your Grok API key to generate meeting memory."
+        }
+    }
+
+    static func resolved(from stored: String?) -> MeetingMemoryProvider {
+        guard let stored, let provider = MeetingMemoryProvider(rawValue: stored) else {
+            return .openai
+        }
+        return provider
+    }
+}
+
+struct MeetingMemoryCredentials: Equatable {
+    var provider: MeetingMemoryProvider
+    var openAIKey: String
+    var openAIVerified: Bool
+    var grokKey: String
+    var grokVerified: Bool
+
+    var selectedKey: String {
+        switch provider {
+        case .openai: return openAIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .grok: return grokKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    var hasSelectedKey: Bool { !selectedKey.isEmpty }
+
+    var isSelectedKeyVerified: Bool {
+        guard hasSelectedKey else { return false }
+        switch provider {
+        case .openai: return openAIVerified
+        case .grok: return grokVerified
+        }
+    }
+}
+
+struct OnboardingReadiness: Equatable {
+    var markedComplete: Bool
+    var transcription: TranscriptionCredentials
+    var meetingMemory: MeetingMemoryCredentials
+
+    var isComplete: Bool {
+        markedComplete
+            && transcription.isSelectedKeyVerified
+            && meetingMemory.isSelectedKeyVerified
+    }
+}
+
 enum OpenRecError: LocalizedError {
     case invalidConfiguration(String)
     case invalidResponse(String)

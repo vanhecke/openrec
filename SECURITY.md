@@ -14,7 +14,7 @@ it. You should get a first response within a few days.
 OpenRec records calls, so a vulnerability here can expose unusually sensitive
 data. Areas worth extra scrutiny:
 
-- **Credentials.** AssemblyAI and OpenAI API keys and the OpenRec Cloud session
+- **Credentials.** AssemblyAI, OpenAI, and Grok (xAI) API keys and the OpenRec Cloud session
   token are stored in the macOS Keychain, never in plists or preferences.
 - **Media.** Recordings stream to OpenRec Cloud or to your own Cloudflare R2
   bucket. Only meeting metadata and a non-secret upload-recovery journal are

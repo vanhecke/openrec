@@ -36,6 +36,30 @@ final class APIKeyAutoVerifierTests: XCTestCase {
         ))
     }
 
+    func testGrokCredentialFailureClassificationPreservesVerifiedKeysOnNonAuthFailures() {
+        XCTAssertTrue(GrokService.isCredentialOrModelAccessFailure(
+            OpenRecError.requestFailed(status: 400, message: "Incorrect API key provided")
+        ))
+        XCTAssertTrue(GrokService.isCredentialOrModelAccessFailure(
+            OpenRecError.requestFailed(status: 401, message: "Unauthorized")
+        ))
+        XCTAssertTrue(GrokService.isCredentialOrModelAccessFailure(
+            OpenRecError.requestFailed(status: 403, message: "Forbidden")
+        ))
+        XCTAssertTrue(GrokService.isCredentialOrModelAccessFailure(
+            OpenRecError.requestFailed(status: 404, message: "Model unavailable")
+        ))
+        XCTAssertFalse(GrokService.isCredentialOrModelAccessFailure(
+            OpenRecError.requestFailed(status: 429, message: "Rate limited")
+        ))
+        XCTAssertFalse(GrokService.isCredentialOrModelAccessFailure(
+            OpenRecError.requestFailed(status: 500, message: "Unavailable")
+        ))
+        XCTAssertFalse(GrokService.isCredentialOrModelAccessFailure(
+            OpenRecError.invalidResponse("Offline")
+        ))
+    }
+
     @MainActor
     func testAutomaticVerificationDebouncesAndUsesTheTrimmedSnapshot() async {
         let sleepStarted = expectation(description: "debounce started")
