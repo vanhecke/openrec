@@ -226,11 +226,27 @@ final class LocalStorageModeTests: XCTestCase {
 
         let manager = CloudStorageManager()
         try manager.upsertLocalMeeting(record)
+        XCTAssertNotNil(manager.localMeeting(id: meetingID))
+        let text = folder.appendingPathComponent("text", isDirectory: true)
+        XCTAssertEqual(
+            try String(contentsOf: text.appendingPathComponent("transcript.txt"), encoding: .utf8),
+            "Transcript"
+        )
+        XCTAssertEqual(
+            try String(contentsOf: text.appendingPathComponent("summary.txt"), encoding: .utf8),
+            "Notes stay here"
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: text.appendingPathComponent("notes.txt").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("transcript.txt").path))
+        XCTAssertEqual(try Data(contentsOf: screen), Data("screen-bytes".utf8))
+        XCTAssertEqual(try Data(contentsOf: audio), Data("audio-bytes".utf8))
+
         try await manager.deleteMeeting(record)
         XCTAssertNil(manager.localMeeting(id: meetingID))
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: screen.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: audio.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: text.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
         try? FileManager.default.removeItem(at: root)
     }

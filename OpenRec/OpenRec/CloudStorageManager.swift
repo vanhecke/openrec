@@ -963,10 +963,17 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
         }
         libraryMeetings.removeAll { $0.id == meeting.id }
         if meeting.storageMode == .local {
-            let folders = Set([meeting.localScreenPath, meeting.localAudioPath].compactMap { path -> String? in
+            let recordingsDirectory = Self.recordingsDirectory()
+            var folders = Set([meeting.localScreenPath, meeting.localAudioPath].compactMap { path -> String? in
                 guard let path else { return nil }
                 return URL(fileURLWithPath: path).deletingLastPathComponent().path
             })
+            if let session = LocalMeetingTextFiles.remove(
+                for: meeting,
+                recordingsDirectory: recordingsDirectory
+            ) {
+                folders.insert(session.path)
+            }
             for folder in folders {
                 let remaining = (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? ["occupied"]
                 if remaining.isEmpty {
@@ -1209,6 +1216,9 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
         let url = meetingsDirectory.appendingPathComponent("\(meeting.id.uuidString.lowercased()).json")
         try Self.jsonEncoder.encode(meeting).write(to: url, options: .atomic)
         mergeIntoLibrary(meeting)
+        if meeting.storageMode == .local {
+            try LocalMeetingTextFiles.sync(meeting, recordingsDirectory: Self.recordingsDirectory())
+        }
     }
 
     /// Turn jobs left behind by a crash into an actionable library state.
