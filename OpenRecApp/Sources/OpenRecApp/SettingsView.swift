@@ -425,6 +425,12 @@ struct OpenRecSettingsView: View {
                                 set: { recorderManager.transcriptionManager.grokTranscriptionLanguage = $0 }
                             )
                         )
+                        GrokKeyTermsSettingsEditor(
+                            keyTerms: Binding(
+                                get: { recorderManager.transcriptionManager.grokTranscriptionKeyTerms },
+                                set: { recorderManager.transcriptionManager.grokTranscriptionKeyTerms = $0 }
+                            )
+                        )
                     }
                 }
             }
@@ -970,6 +976,109 @@ private struct SettingsToggleRow: View {
 
 private struct SettingsDivider: View {
     var body: some View { Color.white.opacity(0.06).frame(height: 1) }
+}
+
+private struct GrokKeyTermRow: Identifiable {
+    let index: Int
+    let term: String
+    var id: Int { index }
+}
+
+private struct GrokKeyTermsSettingsEditor: View {
+    @Binding var keyTerms: [String]
+    @State private var draft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Key terms")
+                .font(.system(size: 10))
+                .foregroundColor(Color.white.opacity(0.5))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+            Text("These words help Grok catch names and product terms.")
+                .font(.system(size: 10))
+                .foregroundColor(Color.white.opacity(0.43))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                TextField(
+                    "",
+                    text: $draft,
+                    prompt: Text("Name or product term").foregroundColor(Color.white.opacity(0.34))
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundColor(Color.white.opacity(0.86))
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity)
+                .frame(height: 34)
+                .background(Color.white.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .onSubmit(addDraft)
+                .disabled(keyTerms.count >= GrokTranscriptionKeyTerms.maxCount)
+                .accessibilityLabel("Key term")
+                Button("Add", action: addDraft)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(canAdd ? 0.9 : 0.28))
+                    .frame(height: 34)
+                    .padding(.horizontal, 12)
+                    .background(Color.white.opacity(canAdd ? 0.1 : 0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .disabled(!canAdd)
+                    .accessibilityLabel("Add key term")
+            }
+            if !keyTerms.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(rows) { row in
+                        HStack(spacing: 8) {
+                            Text(row.term)
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundColor(Color.white.opacity(0.86))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .lineLimit(2)
+                            Button {
+                                remove(at: row.index)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .frame(width: 22, height: 22)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(SettingsPressStyle())
+                            .foregroundColor(Color.white.opacity(0.4))
+                            .accessibilityLabel("Remove \(row.term)")
+                        }
+                        .padding(.horizontal, 11)
+                        .frame(minHeight: 34)
+                        .background(Color.white.opacity(0.025))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+            }
+        }
+    }
+
+    private var rows: [GrokKeyTermRow] {
+        keyTerms.enumerated().map { GrokKeyTermRow(index: $0.offset, term: $0.element) }
+    }
+
+    private var canAdd: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && keyTerms.count < GrokTranscriptionKeyTerms.maxCount
+    }
+
+    private func addDraft() {
+        guard canAdd else { return }
+        keyTerms = GrokTranscriptionKeyTerms.normalized(keyTerms + [draft])
+        draft = ""
+    }
+
+    private func remove(at index: Int) {
+        guard keyTerms.indices.contains(index) else { return }
+        var updated = keyTerms
+        updated.remove(at: index)
+        keyTerms = updated
+    }
 }
 
 private struct GrokLanguageSettingsMenu: View {
