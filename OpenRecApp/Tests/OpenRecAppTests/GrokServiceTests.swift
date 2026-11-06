@@ -583,26 +583,31 @@ final class GrokServiceTests: XCTestCase {
         }
     }
 
+    /// The file part is `name="file"; filename="..."`. A search for `name="`
+    /// also matches the `name="` inside `filename=`, so match the form-data
+    /// parameter `; name="` and read the quoted field name that follows it.
     private func assertLastMultipartField(
         named name: String,
         in body: Data,
         file: StaticString = #file,
         line: UInt = #line
     ) {
-        let needle = Data("name=\"".utf8)
-        var last: Data.Index?
+        let needle = Data("; name=\"".utf8)
+        var lastValue: Data.Index?
         var search = body.startIndex
         while let range = body.range(of: needle, in: search..<body.endIndex) {
-            last = range.lowerBound
+            lastValue = range.upperBound
             search = range.upperBound
         }
-        guard let last else {
+        guard let lastValue else {
             XCTFail("Expected multipart fields", file: file, line: line)
             return
         }
+        let expected = Data("\(name)\"".utf8)
+        let observed = String(data: body[lastValue...].prefix(32), encoding: .utf8) ?? "<binary>"
         XCTAssertTrue(
-            body[last...].starts(with: Data("name=\"\(name)\"".utf8)),
-            "Last field was not \(name)",
+            body[lastValue...].starts(with: expected),
+            "Last field was not \(name); found \(observed)",
             file: file,
             line: line
         )
