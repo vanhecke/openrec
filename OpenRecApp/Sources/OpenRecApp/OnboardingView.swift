@@ -470,7 +470,7 @@ struct OpenRecOnboardingView: View {
         OnboardingPageLayout(
             icon: "cloud.fill",
             title: "Choose where calls live",
-            body: "Use OpenRec Cloud for searchable meeting memory, or send recordings straight to your own Cloudflare R2 bucket."
+            body: "Use OpenRec Cloud for searchable meeting memory, send recordings to your own Cloudflare R2 bucket, or keep everything on this Mac."
         ) {
             VStack(spacing: 10) {
                 StorageChoiceRow(
@@ -491,6 +491,15 @@ struct OpenRecOnboardingView: View {
                     selectStorage(.ownR2)
                 }
 
+                StorageChoiceRow(
+                    icon: "internaldrive",
+                    title: "This Mac",
+                    detail: "Recordings and meeting memory stay on this computer",
+                    selected: recorderManager.cloudStorage.mode == .local
+                ) {
+                    selectStorage(.local)
+                }
+
                 storageConfiguration
                     .id(recorderManager.cloudStorage.mode)
                     .transition(storageConfigurationTransition)
@@ -501,7 +510,8 @@ struct OpenRecOnboardingView: View {
 
     @ViewBuilder
     private var storageConfiguration: some View {
-        if recorderManager.cloudStorage.mode == .managed {
+        switch recorderManager.cloudStorage.mode {
+        case .managed:
             VStack(spacing: 10) {
                 if recorderManager.cloudStorage.isManagedSignedIn {
                     HStack(spacing: 9) {
@@ -541,7 +551,7 @@ struct OpenRecOnboardingView: View {
                         .multilineTextAlignment(.center)
                 }
             }
-        } else {
+        case .ownR2:
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     TextField(
@@ -596,6 +606,32 @@ struct OpenRecOnboardingView: View {
                         .foregroundColor(.white.opacity(0.7))
                         .disabled(!recorderManager.cloudStorage.isReady || r2Check == .running)
                 }
+            }
+        case .local:
+            VStack(spacing: 8) {
+                HStack(spacing: 9) {
+                    Image(systemName: "internaldrive")
+                        .foregroundColor(.white.opacity(0.7))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Ready on this Mac")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.88))
+                        Text((recorderManager.cloudStorage.recordingsDirectoryPath as NSString).abbreviatingWithTildeInPath)
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.48))
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .frame(minHeight: 48)
+                .background(Color.white.opacity(0.065))
+                .cornerRadius(8)
+
+                Text("No Google sign-in or R2 credentials. Change the folder later in Settings.")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.42))
+                    .multilineTextAlignment(.center)
             }
         }
     }
@@ -713,14 +749,18 @@ struct OpenRecOnboardingView: View {
                 OnboardingToggleRow(
                     icon: "rectangle.on.rectangle",
                     title: "Keep screen recording",
-                    detail: "Stream the call video directly to cloud storage",
+                    detail: recorderManager.cloudStorage.mode == .local
+                        ? "Keep the call video in the recordings folder on this Mac"
+                        : "Stream the call video directly to cloud storage",
                     value: preference(\.keepScreenRecording)
                 )
                 rowDivider
                 OnboardingToggleRow(
                     icon: "waveform",
                     title: "Keep audio recording",
-                    detail: "Stream a separate call-audio file to cloud storage",
+                    detail: recorderManager.cloudStorage.mode == .local
+                        ? "Keep a separate call-audio file on this Mac"
+                        : "Stream a separate call-audio file to cloud storage",
                     value: preference(\.keepAudioRecording)
                 )
                 rowDivider
@@ -741,7 +781,9 @@ struct OpenRecOnboardingView: View {
         OnboardingPageLayout(
             icon: "arrow.up.right",
             title: "Send recordings elsewhere",
-            body: "Optionally post each completed call to your own HTTPS endpoint with short-lived private recording links."
+            body: recorderManager.cloudStorage.mode == .local
+                ? "Optionally post each completed call’s metadata to your own HTTPS endpoint. Recordings stay on this Mac."
+                : "Optionally post each completed call to your own HTTPS endpoint with short-lived private recording links."
         ) {
             VStack(spacing: 14) {
                 OnboardingToggleRow(
@@ -907,8 +949,9 @@ struct OpenRecOnboardingView: View {
         case .meetingMemory:
             recorderManager.transcriptionManager.isSelectedMeetingMemoryKeyVerified
         case .storage:
-            recorderManager.cloudStorage.isReady && (
-                recorderManager.cloudStorage.mode == .managed || UserDefaults.standard.bool(forKey: "R2ConnectionVerified")
+            recorderManager.cloudStorage.mode.onboardingCanContinue(
+                isReady: recorderManager.cloudStorage.isReady,
+                r2ConnectionVerified: UserDefaults.standard.bool(forKey: "R2ConnectionVerified")
             )
         case .webhook:
             !recorderManager.callPreferences.sendToWebhook || recorderManager.webhookSettings.isConfigured

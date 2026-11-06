@@ -3,12 +3,27 @@ import Foundation
 enum StorageMode: String, CaseIterable, Identifiable, Codable {
     case managed
     case ownR2
+    case local
 
     var id: String { rawValue }
     var label: String {
         switch self {
         case .managed: return "OpenRec Cloud"
         case .ownR2: return "My R2"
+        case .local: return "This Mac"
+        }
+    }
+
+    /// Onboarding Continue on the storage step. OpenRec Cloud continues once
+    /// Google sign-in makes storage ready. My R2 also needs a verified bucket.
+    /// This Mac is ready with no Google session and no R2 credentials.
+    func onboardingCanContinue(isReady: Bool, r2ConnectionVerified: Bool) -> Bool {
+        guard isReady else { return false }
+        switch self {
+        case .managed, .local:
+            return true
+        case .ownR2:
+            return r2ConnectionVerified
         }
     }
 }

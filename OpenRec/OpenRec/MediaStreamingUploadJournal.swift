@@ -3,6 +3,7 @@ import Foundation
 enum MediaStreamingBackend: String, Codable, Sendable {
     case managed
     case ownR2
+    case local
 }
 
 /// Metadata required to abort one exact multipart upload after a crash. This

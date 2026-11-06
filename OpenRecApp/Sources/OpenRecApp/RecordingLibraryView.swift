@@ -1141,8 +1141,15 @@ struct RecordingLibraryView: View {
     /// exactly what will be removed before doing anything.
     private func confirmAndDelete(_ meeting: MeetingRecord) {
         var removals = ["its transcript and AI notes"]
-        if meeting.hasScreenRecording || meeting.hasAudioRecording { removals.append("the cloud recording") }
-        if meeting.localScreenPath != nil || meeting.localAudioPath != nil { removals.append("the local recording file") }
+        if meeting.storageMode == .local {
+            if meeting.hasScreenRecording || meeting.hasAudioRecording
+                || meeting.localScreenPath != nil || meeting.localAudioPath != nil {
+                removals.append("the recording on this Mac")
+            }
+        } else {
+            if meeting.hasScreenRecording || meeting.hasAudioRecording { removals.append("the cloud recording") }
+            if meeting.localScreenPath != nil || meeting.localAudioPath != nil { removals.append("the local recording file") }
+        }
 
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
