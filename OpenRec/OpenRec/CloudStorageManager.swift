@@ -43,6 +43,7 @@ enum ManagedSignOutPrivacy {
         stub.callApp = nil
         stub.callTitle = nil
         stub.transcript = nil
+        stub.speakerNames = nil
         stub.insights = MeetingInsights(title: needsRecovery ? "Recovery recording" : "Local recording")
         if !needsRecovery {
             stub.localScreenPath = meeting.localScreenPath.flatMap { fileExists($0) ? $0 : nil }
@@ -1758,7 +1759,7 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
         value.audioDeletionScheduledAt = local.audioDeletionScheduledAt
         value.createdAt = min(remote.createdAt, local.createdAt)
         value.updatedAt = max(remote.updatedAt, local.updatedAt)
-        return value
+        return value.withSpeakerNamesPreserved(from: local)
     }
 
     private func mergeIntoLibrary(_ meeting: MeetingRecord) {

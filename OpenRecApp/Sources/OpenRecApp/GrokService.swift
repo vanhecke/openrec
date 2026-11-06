@@ -54,23 +54,14 @@ struct GrokService {
     }
 
     func makeInsightsRequest(transcript: String, callTitle: String?) throws -> URLRequest {
-        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
-            throw OpenRecError.invalidConfiguration("Enter a Grok API key first.")
-        }
-        guard let url = URL(string: "https://api.x.ai/v1/chat/completions") else {
-            throw OpenRecError.invalidConfiguration("Invalid Grok endpoint.")
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
         // grok-4.7 can reason before the structured notes, and long calls
         // produce a large response. Match the OpenAI insights timeout.
-        request.timeoutInterval = 300
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var request = try chatRequest()
 
         let prompt = """
         Turn this meeting transcript into concise, factual meeting memory. Infer participant names only when the transcript explicitly supports them. Never invent names, owners, dates, or decisions. Return JSON matching the provided schema. Suggested title from the call window: \(callTitle ?? "none").
+
+        Lines begin with a bracketed speaker label. When that label is a person's name, use it for participants, decisions, and next-step owners.
 
         For "aiNotes", write markdown notes the way a sharp human note-taker would capture the call as it happened: short "## " section headers that follow the conversation's actual topics, tight "- " bullet fragments underneath (not full prose sentences), with concrete specifics preserved — names, numbers, prices, tools, dates, and memorable quotes worth keeping. Bold the load-bearing terms. Keep it scannable; no filler, no meta commentary about the transcript.
 
@@ -105,6 +96,51 @@ struct GrokService {
             "response_format": responseFormat,
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
+    func makeSpeakerNamesRequest(transcript: String, callTitle: String?) throws -> URLRequest {
+        let request = try chatRequest()
+        let body = SpeakerNames.requestBody(
+            model: MeetingMemoryProvider.grok.modelID,
+            reasoningEffort: "high",
+            transcript: transcript,
+            callTitle: callTitle
+        )
+        var named = request
+        named.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return named
+    }
+
+    func identifySpeakerNames(transcript: String, callTitle: String?) async throws -> [String: String] {
+        let labels = SpeakerNames.speakerLabels(in: transcript)
+        guard !labels.isEmpty else { return [:] }
+        let request = try makeSpeakerNamesRequest(transcript: transcript, callTitle: callTitle)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+        return try SpeakerNames.mapping(
+            fromCompletion: data,
+            labels: labels,
+            transcript: transcript,
+            callTitle: callTitle
+        )
+    }
+
+    /// Authorized chat-completions request with no body yet. Insights and
+    /// speaker names share the host, model timeout, and credential check.
+    private func chatRequest() throws -> URLRequest {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            throw OpenRecError.invalidConfiguration("Enter a Grok API key first.")
+        }
+        guard let url = URL(string: "https://api.x.ai/v1/chat/completions") else {
+            throw OpenRecError.invalidConfiguration("Invalid Grok endpoint.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 300
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         return request
     }
 
@@ -492,6 +528,27 @@ enum MeetingMemoryClient {
             )
         case .grok:
             return try await GrokService(apiKey: apiKey, session: session).generateInsights(
+                transcript: transcript,
+                callTitle: callTitle
+            )
+        }
+    }
+
+    static func identifySpeakerNames(
+        provider: MeetingMemoryProvider,
+        apiKey: String,
+        transcript: String,
+        callTitle: String?,
+        session: URLSession = .shared
+    ) async throws -> [String: String] {
+        switch provider {
+        case .openai:
+            return try await OpenAIService(apiKey: apiKey, session: session).identifySpeakerNames(
+                transcript: transcript,
+                callTitle: callTitle
+            )
+        case .grok:
+            return try await GrokService(apiKey: apiKey, session: session).identifySpeakerNames(
                 transcript: transcript,
                 callTitle: callTitle
             )

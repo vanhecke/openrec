@@ -74,7 +74,8 @@ enum MeetingClipboardText {
     }
 
     static func transcript(for meeting: MeetingRecord) -> String? {
-        nonEmpty(meeting.transcript ?? "")
+        let named = SpeakerNames.apply(meeting.speakerNames ?? [:], to: meeting.transcript ?? "")
+        return nonEmpty(named)
     }
 
     static func meeting(_ meeting: MeetingRecord) -> String {
@@ -167,6 +168,7 @@ struct RecordingLibraryView: View {
                 meeting.insights.summary,
                 meeting.insights.aiNotes,
                 meeting.insights.participants.joined(separator: " "),
+                SpeakerNames.identifiedNames(transcript: meeting.transcript ?? "", mapping: meeting.speakerNames ?? [:]).joined(separator: " "),
                 meeting.transcript ?? "",
             ].joined(separator: " ").localizedCaseInsensitiveContains(query)
         }
@@ -871,6 +873,7 @@ struct RecordingLibraryView: View {
                 }
 
                 mediaCard(meeting)
+                speakerNamesSection(meeting)
 
                 HStack(spacing: 4) {
                     ForEach(MeetingDetailTab.allCases) { tab in
@@ -1054,7 +1057,7 @@ struct RecordingLibraryView: View {
             icon: "text.quote",
             copyText: MeetingClipboardText.transcript(for: meeting)
         ) {
-            if let transcript = meeting.transcript, !transcript.isEmpty {
+            if let transcript = MeetingClipboardText.transcript(for: meeting) {
                 Text(transcript)
                     .font(.system(size: 12))
                     .foregroundColor(primary.opacity(0.82))
@@ -1143,7 +1146,52 @@ struct RecordingLibraryView: View {
         current.localAudioPath = updated.localAudioPath
         current.hasScreenRecording = updated.hasScreenRecording
         current.hasAudioRecording = updated.hasAudioRecording
+        if updated.speakerNames != nil {
+            current.speakerNames = updated.speakerNames
+        }
         return current
+    }
+
+    @ViewBuilder
+    private func speakerNamesSection(_ meeting: MeetingRecord) -> some View {
+        let rows = SpeakerNames.rows(transcript: meeting.transcript ?? "", mapping: meeting.speakerNames ?? [:])
+        if !rows.isEmpty {
+            MeetingSection(title: "Speakers", icon: "person.crop.rectangle.stack") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Correct a name if it is wrong. The next meeting analysis uses these names.")
+                        .font(.system(size: 11))
+                        .foregroundColor(secondary)
+                    ForEach(rows) { row in
+                        SpeakerNameRowEditor(
+                            label: row.label,
+                            name: row.name,
+                            primary: primary,
+                            onCommit: { commitSpeakerName($0, for: row.label, on: meeting) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func commitSpeakerName(_ name: String, for label: String, on meeting: MeetingRecord) {
+        var updated = meeting
+        var mapping = updated.speakerNames ?? [:]
+        if let normalized = SpeakerNames.normalizedUserName(name) {
+            guard mapping[label] != normalized else { return }
+            mapping[label] = normalized
+        } else {
+            guard mapping[label] != nil else { return }
+            mapping.removeValue(forKey: label)
+        }
+        updated.speakerNames = mapping
+        updated.updatedAt = Date()
+        do {
+            try recorderManager.cloudStorage.upsertLocalMeeting(updated)
+            detail = updated
+        } catch {
+            detailError = error.localizedDescription
+        }
     }
 
     private func play(_ meeting: MeetingRecord, kind: MeetingMediaKind) {
@@ -1379,6 +1427,65 @@ private struct UpcomingEventRow: View {
     }()
 }
 
+private struct SpeakerNameRowEditor: View {
+    let label: String
+    let name: String
+    let primary: Color
+    let onCommit: (String) -> Void
+
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(primary.opacity(0.55))
+                .frame(width: 92, alignment: .leading)
+                .lineLimit(1)
+            TextField(
+                "",
+                text: $draft,
+                prompt: Text("Add name").foregroundColor(Color.white.opacity(0.34))
+            )
+            .focused($focused)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .foregroundColor(primary)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(Color.white.opacity(0.07))
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .onSubmit { commit() }
+        }
+        .onAppear { draft = name }
+        .onChange(of: name) { value in
+            if !focused { draft = value }
+        }
+        .onChange(of: focused) { isFocused in
+            if !isFocused { commit() }
+        }
+    }
+
+    private func commit() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            guard !name.isEmpty else { return }
+            onCommit("")
+            return
+        }
+        guard let normalized = SpeakerNames.normalizedUserName(draft) else {
+            draft = name
+            return
+        }
+        guard normalized != name else {
+            draft = name
+            return
+        }
+        onCommit(normalized)
+    }
+}
+
 private struct MeetingRow: View {
     let meeting: MeetingRecord
     let selected: Bool
@@ -1408,9 +1515,9 @@ private struct MeetingRow: View {
                     }
                     HStack(spacing: 6) {
                         Text(Self.rowDate.string(from: meeting.startedAt))
-                        if !meeting.insights.participants.isEmpty {
+                        if let names = rowSpeakerNames {
                             Text("·")
-                            Text(meeting.insights.participants.prefix(2).joined(separator: ", "))
+                            Text(names)
                         }
                         Spacer(minLength: 2)
                         if meeting.hasPlayableScreen { Image(systemName: "rectangle.inset.filled.and.person.filled") }
@@ -1428,6 +1535,18 @@ private struct MeetingRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(LibraryPressStyle())
+    }
+
+    private var rowSpeakerNames: String? {
+        let identified = SpeakerNames.identifiedNames(
+            transcript: meeting.transcript ?? "",
+            mapping: meeting.speakerNames ?? [:]
+        )
+        if !identified.isEmpty { return identified.prefix(2).joined(separator: ", ") }
+        if !meeting.insights.participants.isEmpty {
+            return meeting.insights.participants.prefix(2).joined(separator: ", ")
+        }
+        return nil
     }
 
     private static let rowDate: DateFormatter = {

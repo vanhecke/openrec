@@ -30,6 +30,8 @@ final class TranscriptionManager: ObservableObject {
     @Published var showPanel = false
     @Published var partialText = ""
     @Published var committedSegments: [DisplaySegment] = []
+    /// Label → name for the transcript currently on screen. The saved copy lives on the meeting.
+    @Published var speakerNames: [String: String] = [:]
     @Published var insights = MeetingInsights()
     @Published var error: String?
 
@@ -273,13 +275,19 @@ final class TranscriptionManager: ObservableObject {
         }
     }
 
-    func analyze(callTitle: String?) async throws -> MeetingInsights {
+    func analyze(callTitle: String?, speakerNames: [String: String]? = nil) async throws -> MeetingInsights {
         let transcript = fullTranscriptText()
         guard !transcript.isEmpty else { return MeetingInsights() }
+        let mapping = speakerNames ?? self.speakerNames
+        self.speakerNames = mapping
         isAnalyzing = true
         defer { isAnalyzing = false }
         do {
-            let value = try await generateInsights(transcript: transcript, callTitle: callTitle)
+            let value = try await generateInsights(
+                transcript: transcript,
+                callTitle: callTitle,
+                speakerNames: mapping
+            )
             insights = value
             return value
         } catch {
@@ -288,15 +296,33 @@ final class TranscriptionManager: ObservableObject {
         }
     }
 
-    func generateInsights(transcript: String, callTitle: String?) async throws -> MeetingInsights {
+    func identifySpeakerNames(transcript: String, callTitle: String?) async throws -> [String: String] {
         let credentials = meetingMemoryCredentials
         guard credentials.hasSelectedKey else {
             throw OpenRecError.invalidConfiguration(credentials.provider.missingKeyConfigurationMessage)
         }
-        return try await MeetingMemoryClient.generateInsights(
+        return try await MeetingMemoryClient.identifySpeakerNames(
             provider: credentials.provider,
             apiKey: credentials.selectedKey,
             transcript: transcript,
+            callTitle: callTitle
+        )
+    }
+
+    func generateInsights(
+        transcript: String,
+        callTitle: String?,
+        speakerNames: [String: String] = [:]
+    ) async throws -> MeetingInsights {
+        let credentials = meetingMemoryCredentials
+        guard credentials.hasSelectedKey else {
+            throw OpenRecError.invalidConfiguration(credentials.provider.missingKeyConfigurationMessage)
+        }
+        let named = SpeakerNames.apply(speakerNames, to: transcript)
+        return try await MeetingMemoryClient.generateInsights(
+            provider: credentials.provider,
+            apiKey: credentials.selectedKey,
+            transcript: named,
             callTitle: callTitle
         )
     }
@@ -311,9 +337,14 @@ final class TranscriptionManager: ObservableObject {
         committedSegments.map { "[\($0.speakerLabel)] \($0.text)" }.joined(separator: "\n")
     }
 
+    func namedTranscriptText() -> String {
+        SpeakerNames.apply(speakerNames, to: fullTranscriptText())
+    }
+
     func resetTranscript() {
         partialText = ""
         committedSegments = []
+        speakerNames = [:]
         error = nil
         insights = MeetingInsights()
         savedEnergyTimeline = []

@@ -67,7 +67,10 @@ struct TranscriptionInlineView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(transcriptionManager.committedSegments) { segment in
-                        TranscriptSegmentRow(segment: segment)
+                        TranscriptSegmentRow(
+                            segment: segment,
+                            speakerNames: transcriptionManager.speakerNames
+                        )
                             .id(segment.id)
                     }
 
@@ -131,7 +134,7 @@ struct TranscriptionInlineView: View {
     // MARK: - Actions
 
     private func copyTranscript() {
-        let text = transcriptionManager.fullTranscriptText()
+        let text = transcriptionManager.namedTranscriptText()
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         copiedFeedback = true
@@ -145,6 +148,7 @@ struct TranscriptionInlineView: View {
 
 private struct TranscriptSegmentRow: View {
     let segment: DisplaySegment
+    var speakerNames: [String: String] = [:]
 
     private var speakerColor: Color {
         segment.speakerLabel == "Me" ? .blue : .green
@@ -157,7 +161,7 @@ private struct TranscriptSegmentRow: View {
                     .fill(speakerColor)
                     .frame(width: 6, height: 6)
 
-                Text(segment.speakerLabel)
+                Text(SpeakerNames.displayName(for: segment.speakerLabel, mapping: speakerNames))
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(speakerColor)
 

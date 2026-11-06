@@ -31,6 +31,7 @@
 		A1000065243B0001 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000075243B0001 /* OnboardingView.swift */; };
 		A1000066243B0001 /* OpenAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000076243B0001 /* OpenAIService.swift */; };
 		A10000CF243B0003 /* GrokService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000CE243B0003 /* GrokService.swift */; };
+		A10000D1243B0004 /* SpeakerNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000D0243B0004 /* SpeakerNames.swift */; };
 		A100006A243B0001 /* AssemblyAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100007A243B0001 /* AssemblyAIService.swift */; };
 		A10000CA243B0002 /* CalendarMeetingSuggester.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000CB243B0002 /* CalendarMeetingSuggester.swift */; };
 		A100006B243B0001 /* MediaStreamingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100007B243B0001 /* MediaStreamingSession.swift */; };
@@ -71,6 +72,7 @@
 		A1000075243B0001 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A1000076243B0001 /* OpenAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIService.swift; sourceTree = "<group>"; };
 		A10000CE243B0003 /* GrokService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokService.swift; sourceTree = "<group>"; };
+		A10000D0243B0004 /* SpeakerNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNames.swift; sourceTree = "<group>"; };
 		A100007A243B0001 /* AssemblyAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssemblyAIService.swift; sourceTree = "<group>"; };
 		A10000CB243B0002 /* CalendarMeetingSuggester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarMeetingSuggester.swift; sourceTree = "<group>"; };
 		A100007B243B0001 /* MediaStreamingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaStreamingSession.swift; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 				A1000075243B0001 /* OnboardingView.swift */,
 				A1000076243B0001 /* OpenAIService.swift */,
 				A10000CE243B0003 /* GrokService.swift */,
+				A10000D0243B0004 /* SpeakerNames.swift */,
 				A100007A243B0001 /* AssemblyAIService.swift */,
 				A10000CB243B0002 /* CalendarMeetingSuggester.swift */,
 				A1000077243B0001 /* WebhookDeliveryService.swift */,
@@ -273,6 +276,7 @@
 				A1000065243B0001 /* OnboardingView.swift in Sources */,
 				A1000066243B0001 /* OpenAIService.swift in Sources */,
 				A10000CF243B0003 /* GrokService.swift in Sources */,
+				A10000D1243B0004 /* SpeakerNames.swift in Sources */,
 				A100006A243B0001 /* AssemblyAIService.swift in Sources */,
 				A10000CA243B0002 /* CalendarMeetingSuggester.swift in Sources */,
 				A1000067243B0001 /* WebhookDeliveryService.swift in Sources */,
