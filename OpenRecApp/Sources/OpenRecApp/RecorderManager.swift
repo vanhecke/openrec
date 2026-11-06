@@ -65,7 +65,7 @@ struct CloudTranscriptRetentionPolicy {
     }
 
     static let noSpeechFailureMessage =
-        "AssemblyAI processed the recording but did not detect any spoken words — the API key and connection are fine. OpenRec kept the recording needed for retry in case the call did contain speech; check the selected microphone before the next call."
+        "Transcription processed the recording but did not detect any spoken words — the API key and connection are fine. OpenRec kept the recording needed for retry in case the call did contain speech; check the selected microphone before the next call."
 
     static func validatedTranscript(
         _ transcript: String,
@@ -80,7 +80,7 @@ struct CloudTranscriptRetentionPolicy {
             }
             if AssemblyAIService.isAuthenticationFailure(failure) {
                 throw OpenRecError.recordingFailed(
-                    "AssemblyAI rejected the API key, so this recording was not transcribed. OpenRec kept the recording needed for retry. Fix the AssemblyAI API key in Settings, then retry this meeting."
+                    "The transcription provider rejected the API key, so this recording was not transcribed. OpenRec kept the recording needed for retry. Fix the API key in Settings, then retry this meeting."
                 )
             }
             var description = failure.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -336,12 +336,13 @@ final class RecorderManager: ObservableObject {
 
     func startRecording() async {
         guard !isRecording, !isProcessing, !isStarting else { return }
-        guard transcriptionManager.hasAssemblyAIAPIKey else {
-            lastErrorMessage = "Open Settings and add your AssemblyAI API key before recording."
+        let transcription = transcriptionManager.transcriptionCredentials
+        guard transcription.hasSelectedKey else {
+            lastErrorMessage = transcription.provider.missingKeySettingsMessage
             return
         }
-        guard transcriptionManager.isAssemblyAIAPIKeyVerified else {
-            lastErrorMessage = "Open Settings and test your AssemblyAI API key before recording."
+        guard transcription.isSelectedKeyVerified else {
+            lastErrorMessage = transcription.provider.unverifiedKeySettingsMessage
             return
         }
         let meetingMemory = transcriptionManager.meetingMemoryCredentials

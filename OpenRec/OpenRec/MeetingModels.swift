@@ -238,7 +238,92 @@ struct MeetingRecord: Codable, Identifiable, Equatable {
     }
 }
 
-/// Which provider writes meeting memory after AssemblyAI transcription.
+/// Which provider transcribes and diarizes the recording.
+/// An absent or unknown stored value stays on AssemblyAI so existing installs
+/// keep their current transcription key and path.
+enum TranscriptionProvider: String, CaseIterable, Identifiable {
+    case assemblyAI
+    case grok
+
+    static let defaultsKey = "TranscriptionProvider"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .assemblyAI: return "AssemblyAI"
+        case .grok: return "Grok"
+        }
+    }
+
+    var modelLabel: String {
+        switch self {
+        case .assemblyAI: return "Universal-3.5 Pro"
+        case .grok: return "grok-voice-transcribe-2.0"
+        }
+    }
+
+    var missingKeySettingsMessage: String {
+        switch self {
+        case .assemblyAI:
+            return "Open Settings and add your AssemblyAI API key before recording."
+        case .grok:
+            return "Open Settings and add your Grok API key before recording."
+        }
+    }
+
+    var unverifiedKeySettingsMessage: String {
+        switch self {
+        case .assemblyAI:
+            return "Open Settings and test your AssemblyAI API key before recording."
+        case .grok:
+            return "Open Settings and test your Grok API key before recording."
+        }
+    }
+
+    var missingKeyConfigurationMessage: String {
+        switch self {
+        case .assemblyAI:
+            return "Add your AssemblyAI API key before recording."
+        case .grok:
+            return "Add your Grok API key before recording."
+        }
+    }
+
+    static func resolved(from stored: String?) -> TranscriptionProvider {
+        guard let stored, let provider = TranscriptionProvider(rawValue: stored) else {
+            return .assemblyAI
+        }
+        return provider
+    }
+}
+
+struct TranscriptionCredentials: Equatable {
+    var provider: TranscriptionProvider
+    var assemblyKey: String
+    var assemblyVerified: Bool
+    var grokKey: String
+    var grokVerified: Bool
+
+    var selectedKey: String {
+        switch provider {
+        case .assemblyAI: return assemblyKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .grok: return grokKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    var hasSelectedKey: Bool { !selectedKey.isEmpty }
+
+    var isSelectedKeyVerified: Bool {
+        guard hasSelectedKey else { return false }
+        switch provider {
+        case .assemblyAI: return assemblyVerified
+        case .grok: return grokVerified
+        }
+    }
+}
+
+/// Which provider writes meeting memory after transcription.
 /// An absent or unknown stored value stays on OpenAI so existing installs
 /// keep their current key, onboarding, and analyze path.
 enum MeetingMemoryProvider: String, CaseIterable, Identifiable {
@@ -359,14 +444,13 @@ struct MeetingMemoryCredentials: Equatable {
 
 struct OnboardingReadiness: Equatable {
     var markedComplete: Bool
-    var assemblyKey: String
-    var assemblyVerified: Bool
+    var transcription: TranscriptionCredentials
     var meetingMemory: MeetingMemoryCredentials
 
     var isComplete: Bool {
-        let assemblyReady = !assemblyKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && assemblyVerified
-        return markedComplete && assemblyReady && meetingMemory.isSelectedKeyVerified
+        markedComplete
+            && transcription.isSelectedKeyVerified
+            && meetingMemory.isSelectedKeyVerified
     }
 }
 

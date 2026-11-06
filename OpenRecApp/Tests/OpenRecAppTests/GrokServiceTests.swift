@@ -176,6 +176,136 @@ final class GrokServiceTests: XCTestCase {
         XCTAssertEqual(insights.participants, ["Ada"])
     }
 
+    func testDiarizedWordsGroupIntoConsecutiveSpeakerTurns() throws {
+        let response = GrokSTTResponse(
+            text: "Morning. Let's ship it. Agreed.",
+            duration: 2.8,
+            words: [
+                GrokSTTWord(text: "Morning.", start: 0.25, end: 0.6, speaker: 0),
+                GrokSTTWord(text: "Let's", start: 1.25, end: 1.45, speaker: 1),
+                GrokSTTWord(text: "ship", start: 1.45, end: 1.7, speaker: 1),
+                GrokSTTWord(text: "it.", start: 1.7, end: 2.0, speaker: 1),
+                GrokSTTWord(text: "Agreed.", start: 2.4, end: 2.8, speaker: 0),
+            ]
+        )
+
+        let segments = try GrokTranscriptMapper.displaySegments(from: response)
+
+        XCTAssertEqual(segments.count, 3)
+        XCTAssertEqual(segments[0].speakerLabel, "Speaker 0")
+        XCTAssertEqual(segments[0].text, "Morning.")
+        XCTAssertEqual(try XCTUnwrap(segments[0].timestamp), 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(segments[1].speakerLabel, "Speaker 1")
+        XCTAssertEqual(segments[1].text, "Let's ship it.")
+        XCTAssertEqual(try XCTUnwrap(segments[1].timestamp), 1.25, accuracy: 0.000_001)
+        XCTAssertEqual(segments[2].speakerLabel, "Speaker 0")
+        XCTAssertEqual(segments[2].text, "Agreed.")
+        XCTAssertEqual(try XCTUnwrap(segments[2].timestamp), 2.4, accuracy: 0.000_001)
+    }
+
+    func testMissingSpeakerAndEmptyTranscriptFollowTheDisplayShape() throws {
+        let unlabeled = GrokSTTResponse(
+            text: "Hello there.",
+            duration: 1,
+            words: [
+                GrokSTTWord(text: "Hello", start: 0.1, end: 0.3, speaker: nil),
+                GrokSTTWord(text: " ", start: 0.3, end: 0.31, speaker: nil),
+                GrokSTTWord(text: "there.", start: 0.31, end: 0.6, speaker: nil),
+            ]
+        )
+        let textOnly = GrokSTTResponse(text: "A transcript without words.", duration: 1, words: nil)
+        let silent = GrokSTTResponse(text: "  ", duration: 0, words: [])
+
+        let unlabeledSegments = try GrokTranscriptMapper.displaySegments(from: unlabeled)
+        XCTAssertEqual(unlabeledSegments.count, 1)
+        XCTAssertEqual(unlabeledSegments[0].speakerLabel, "Speaker")
+        XCTAssertEqual(unlabeledSegments[0].text, "Hello there.")
+
+        let fallback = try GrokTranscriptMapper.displaySegments(from: textOnly)
+        XCTAssertEqual(fallback.count, 1)
+        XCTAssertEqual(fallback[0].speakerLabel, "Conversation")
+        XCTAssertEqual(fallback[0].text, "A transcript without words.")
+
+        XCTAssertThrowsError(try GrokTranscriptMapper.displaySegments(from: silent)) { error in
+            guard case OpenRecError.noSpeechDetected = error else {
+                return XCTFail("Expected noSpeechDetected, got \(error)")
+            }
+        }
+    }
+
+    func testFileTranscriptionRequestIsMultipartDiarizedSTT() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GrokSTT-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioURL = directory.appendingPathComponent("call.m4a")
+        let audio = Data("not-a-real-recording".utf8)
+        try audio.write(to: audioURL)
+
+        let request = try GrokService(apiKey: "  \(apiKey)\n").makeTranscriptionRequest(fileURL: audioURL)
+        let body = try bodyData(from: request)
+        let contentType = try XCTUnwrap(request.value(forHTTPHeaderField: "Content-Type"))
+
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.absoluteString, "https://api.x.ai/v1/stt")
+        XCTAssertNotEqual(request.url?.path, "/v1/chat/completions")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(apiKey)")
+        XCTAssertTrue(contentType.hasPrefix("multipart/form-data; boundary="))
+        XCTAssertTrue(body.range(of: Data("name=\"model\"".utf8)) != nil)
+        XCTAssertTrue(body.range(of: Data("grok-voice-transcribe-2.0".utf8)) != nil)
+        XCTAssertTrue(body.range(of: Data("name=\"diarize\"".utf8)) != nil)
+        XCTAssertTrue(body.range(of: Data("true".utf8)) != nil)
+        XCTAssertTrue(body.range(of: Data("name=\"file\"; filename=\"call.m4a\"".utf8)) != nil)
+        XCTAssertTrue(body.range(of: Data("Content-Type: audio/mp4".utf8)) != nil)
+        XCTAssertTrue(body.range(of: audio) != nil)
+        let model = try XCTUnwrap(body.range(of: Data("name=\"model\"".utf8)))
+        let file = try XCTUnwrap(body.range(of: Data("name=\"file\"".utf8)))
+        XCTAssertLessThan(model.lowerBound, file.lowerBound)
+        XCTAssertFalse(body.range(of: Data(apiKey.utf8)) != nil)
+        XCTAssertFalse(request.url?.absoluteString.contains("api.openai.com") == true)
+        XCTAssertFalse(request.url?.absoluteString.contains("assemblyai.com") == true)
+    }
+
+    func testURLTranscriptionRequestSendsTheRemoteURLWithoutAFilePart() throws {
+        let audioURL = try XCTUnwrap(URL(string: "https://example.com/calls/audio.m4a?sig=1"))
+        let request = try GrokService(apiKey: apiKey).makeTranscriptionRequest(audioURL: audioURL)
+        let body = try bodyData(from: request)
+
+        XCTAssertEqual(request.url?.absoluteString, "https://api.x.ai/v1/stt")
+        XCTAssertTrue(body.range(of: Data("name=\"url\"".utf8)) != nil)
+        XCTAssertTrue(body.range(of: Data(audioURL.absoluteString.utf8)) != nil)
+        XCTAssertTrue(body.range(of: Data("name=\"diarize\"".utf8)) != nil)
+        XCTAssertNil(body.range(of: Data("name=\"file\"".utf8)))
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(apiKey)")
+    }
+
+    func testTranscribeMapsADiarizedFixtureFromTheSTTEndpoint() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GrokSTTLive-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioURL = directory.appendingPathComponent("call.m4a")
+        try Data("audio-bytes".utf8).write(to: audioURL)
+        GrokMockURLProtocol.handler = { request in
+            let body = try Self.bodyData(from: request)
+            XCTAssertEqual(request.url?.absoluteString, "https://api.x.ai/v1/stt")
+            XCTAssertNotEqual(request.url?.path, "/v1/chat/completions")
+            XCTAssertTrue(body.range(of: Data("name=\"diarize\"".utf8)) != nil)
+            XCTAssertTrue(body.range(of: Data("grok-voice-transcribe-2.0".utf8)) != nil)
+            let payload = """
+            {"text":"Morning. Let's ship it.","duration":2.0,"words":[{"text":"Morning.","start":0.25,"end":0.6,"speaker":0},{"text":"Let's","start":1.25,"end":1.5,"speaker":1},{"text":"ship","start":1.5,"end":1.8,"speaker":1},{"text":"it.","start":1.8,"end":2.0,"speaker":1}]}
+            """
+            return (Self.response(url: try XCTUnwrap(request.url)), Data(payload.utf8))
+        }
+
+        let segments = try await GrokService(apiKey: apiKey, session: session).transcribe(fileURL: audioURL)
+
+        XCTAssertEqual(segments.map(\.speakerLabel), ["Speaker 0", "Speaker 1"])
+        XCTAssertEqual(segments.map(\.text), ["Morning.", "Let's ship it."])
+        XCTAssertEqual(try XCTUnwrap(segments[0].timestamp), 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(try XCTUnwrap(segments[1].timestamp), 1.25, accuracy: 0.000_001)
+    }
+
     func testSelectedProviderRoutesInsightsToThatAPI() async throws {
         GrokMockURLProtocol.handler = { request in
             let host = try XCTUnwrap(request.url?.host)

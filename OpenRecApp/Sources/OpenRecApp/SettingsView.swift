@@ -171,7 +171,7 @@ struct OpenRecSettingsView: View {
     private var sectionDescription: String {
         switch section {
         case .account: return "Choose the private home for meeting memory and recordings."
-        case .aiModels: return "AssemblyAI transcribes each call; OpenAI or Grok turns it into useful meeting memory."
+        case .aiModels: return "AssemblyAI or Grok transcribes each call; OpenAI or Grok turns it into useful meeting memory."
         case .recording: return "Set defaults for new calls. During-call changes apply only to that call."
         case .integrations: return "Deliver completed meeting metadata and recordings to your systems."
         case .permissions: return "OpenRec only captures your screen and microphone while recording."
@@ -391,27 +391,27 @@ struct OpenRecSettingsView: View {
 
     private var aiModelsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SettingsCard(title: "Meeting memory") {
+            SettingsCard(title: "Transcription") {
                 VStack(spacing: 8) {
-                    Text("AssemblyAI still transcribes. Pick which provider writes summaries, decisions, and next steps.")
+                    Text("Pick which provider creates the diarized transcript.")
                         .font(.system(size: 10))
                         .foregroundColor(secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     StorageSettingsChoice(
-                        icon: "sparkles",
-                        title: "OpenAI",
-                        detail: MeetingMemoryProvider.openai.modelID,
-                        selected: recorderManager.transcriptionManager.meetingMemoryProvider == .openai
+                        icon: "waveform",
+                        title: "AssemblyAI",
+                        detail: TranscriptionProvider.assemblyAI.modelLabel,
+                        selected: recorderManager.transcriptionManager.transcriptionProvider == .assemblyAI
                     ) {
-                        recorderManager.transcriptionManager.meetingMemoryProvider = .openai
+                        recorderManager.transcriptionManager.transcriptionProvider = .assemblyAI
                     }
                     StorageSettingsChoice(
-                        icon: "sparkles",
+                        icon: "waveform",
                         title: "Grok",
-                        detail: MeetingMemoryProvider.grok.modelID,
-                        selected: recorderManager.transcriptionManager.meetingMemoryProvider == .grok
+                        detail: TranscriptionProvider.grok.modelLabel,
+                        selected: recorderManager.transcriptionManager.transcriptionProvider == .grok
                     ) {
-                        recorderManager.transcriptionManager.meetingMemoryProvider = .grok
+                        recorderManager.transcriptionManager.transcriptionProvider = .grok
                     }
                 }
             }
@@ -444,6 +444,71 @@ struct OpenRecSettingsView: View {
                         idleText: "Paste to verify automatically · stored in Keychain"
                     ) {
                         testAssemblyAI()
+                    }
+                }
+            }
+
+            SettingsCard(title: "Transcription · Grok") {
+                VStack(alignment: .leading, spacing: 10) {
+                    if grokKeyLivesOnMemoryCard {
+                        Text("Uses the Grok API key saved under Meeting memory. One key covers transcription and meeting memory.")
+                            .font(.system(size: 10))
+                            .foregroundColor(secondary)
+                    } else {
+                        SettingsSecureField(
+                            prompt: MeetingMemoryProvider.grok.keyPlaceholder,
+                            text: Binding(
+                                get: { recorderManager.transcriptionManager.xaiAPIKey },
+                                set: { grokKeyChanged(to: $0) }
+                            )
+                        )
+                    }
+                    HStack(spacing: 8) {
+                        Label(TranscriptionProvider.grok.modelLabel, systemImage: "waveform")
+                        Text("·")
+                        Text("speaker diarization")
+                        Spacer()
+                        if !grokKeyLivesOnMemoryCard {
+                            Button("Create API key") {
+                                NSWorkspace.shared.open(MeetingMemoryProvider.grok.consoleURL)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(secondary)
+                    if !grokKeyLivesOnMemoryCard {
+                        SettingsTestRow(
+                            state: grokCheck,
+                            idleText: "Paste to verify automatically · stored in Keychain"
+                        ) {
+                            testGrok()
+                        }
+                    }
+                }
+            }
+
+            SettingsCard(title: "Meeting memory") {
+                VStack(spacing: 8) {
+                    Text("Pick which provider writes summaries, decisions, and next steps.")
+                        .font(.system(size: 10))
+                        .foregroundColor(secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    StorageSettingsChoice(
+                        icon: "sparkles",
+                        title: "OpenAI",
+                        detail: MeetingMemoryProvider.openai.modelID,
+                        selected: recorderManager.transcriptionManager.meetingMemoryProvider == .openai
+                    ) {
+                        recorderManager.transcriptionManager.meetingMemoryProvider = .openai
+                    }
+                    StorageSettingsChoice(
+                        icon: "sparkles",
+                        title: "Grok",
+                        detail: MeetingMemoryProvider.grok.modelID,
+                        selected: recorderManager.transcriptionManager.meetingMemoryProvider == .grok
+                    ) {
+                        recorderManager.transcriptionManager.meetingMemoryProvider = .grok
                     }
                 }
             }
@@ -482,30 +547,40 @@ struct OpenRecSettingsView: View {
 
             SettingsCard(title: "Meeting memory · Grok") {
                 VStack(alignment: .leading, spacing: 10) {
-                    SettingsSecureField(
-                        prompt: MeetingMemoryProvider.grok.keyPlaceholder,
-                        text: Binding(
-                            get: { recorderManager.transcriptionManager.xaiAPIKey },
-                            set: { grokKeyChanged(to: $0) }
+                    if grokKeyLivesOnTranscriptionCard {
+                        Text("Uses the Grok API key saved under Transcription. One key covers transcription and meeting memory.")
+                            .font(.system(size: 10))
+                            .foregroundColor(secondary)
+                    } else {
+                        SettingsSecureField(
+                            prompt: MeetingMemoryProvider.grok.keyPlaceholder,
+                            text: Binding(
+                                get: { recorderManager.transcriptionManager.xaiAPIKey },
+                                set: { grokKeyChanged(to: $0) }
+                            )
                         )
-                    )
+                    }
                     HStack(spacing: 8) {
                         Label(MeetingMemoryProvider.grok.modelID, systemImage: "sparkles")
                         Text("·")
                         Text("summaries, decisions, and next steps")
                         Spacer()
-                        Button("Create API key") {
-                            NSWorkspace.shared.open(MeetingMemoryProvider.grok.consoleURL)
+                        if !grokKeyLivesOnTranscriptionCard {
+                            Button("Create API key") {
+                                NSWorkspace.shared.open(MeetingMemoryProvider.grok.consoleURL)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(secondary)
-                    SettingsTestRow(
-                        state: grokCheck,
-                        idleText: "Paste to verify automatically · used only for meeting memory"
-                    ) {
-                        testGrok()
+                    if !grokKeyLivesOnTranscriptionCard {
+                        SettingsTestRow(
+                            state: grokCheck,
+                            idleText: "Paste to verify automatically · stored in Keychain"
+                        ) {
+                            testGrok()
+                        }
                     }
                 }
             }
@@ -616,6 +691,18 @@ struct OpenRecSettingsView: View {
                 .foregroundColor(secondary)
                 .padding(.top, 4)
         }
+    }
+
+    /// One xAI key field. Transcription owns it when Grok transcribes, and also
+    /// when Grok is not the meeting-memory provider. Meeting memory owns it only
+    /// when Grok writes notes and AssemblyAI transcribes.
+    private var grokKeyLivesOnTranscriptionCard: Bool {
+        let manager = recorderManager.transcriptionManager
+        return manager.transcriptionProvider == .grok || manager.meetingMemoryProvider != .grok
+    }
+
+    private var grokKeyLivesOnMemoryCard: Bool {
+        !grokKeyLivesOnTranscriptionCard
     }
 
     private func preference(_ path: WritableKeyPath<CallPreferences, Bool>) -> Binding<Bool> {

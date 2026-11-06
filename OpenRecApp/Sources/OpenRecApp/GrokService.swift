@@ -4,6 +4,8 @@ import Foundation
 /// grok-4.3 is the fast Grok model: structured outputs, configurable reasoning,
 /// and the current analog of gpt-5-mini. Key checks call xAI only.
 struct GrokService {
+    static let speechToTextModelID = TranscriptionProvider.grok.modelLabel
+
     let apiKey: String
     let session: URLSession
 
@@ -211,6 +213,219 @@ struct GrokService {
         if flattened.isEmpty { return "Unknown error" }
         if flattened.count > 280 { return String(flattened.prefix(280)) }
         return flattened
+    }
+
+    func transcribe(fileURL: URL) async throws -> [DisplaySegment] {
+        let request = try makeTranscriptionRequest(fileURL: fileURL)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+        return try decodeTranscript(data)
+    }
+
+    /// Transcribe media that is already in private cloud storage through a
+    /// short-lived HTTPS URL. xAI downloads it server-side.
+    func transcribe(audioURL: URL) async throws -> [DisplaySegment] {
+        let request = try makeTranscriptionRequest(audioURL: audioURL)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+        return try decodeTranscript(data)
+    }
+
+    func makeTranscriptionRequest(fileURL: URL) throws -> URLRequest {
+        let key = try trimmedKey()
+        guard fileURL.isFileURL, FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw OpenRecError.invalidConfiguration("The recording for transcription is missing.")
+        }
+        let fileSize = ((try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size]) as? NSNumber)?.int64Value ?? 0
+        guard fileSize > 0 else {
+            throw OpenRecError.recordingFailed("The recording for transcription is empty.")
+        }
+        guard fileSize <= 500 * 1024 * 1024 else {
+            throw OpenRecError.invalidConfiguration("Grok transcription accepts audio up to 500 MB.")
+        }
+        let fileData = try Data(contentsOf: fileURL)
+        let fileName = Self.safeFileName(fileURL.lastPathComponent)
+        let boundary = "OpenRecGrok\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        let body = Self.multipartBody(
+            fields: [
+                ("model", Self.speechToTextModelID),
+                ("diarize", "true"),
+            ],
+            fileField: "file",
+            fileName: fileName,
+            mimeType: Self.mimeType(for: fileURL),
+            fileData: fileData,
+            boundary: boundary
+        )
+        return try Self.sttRequest(apiKey: key, body: body, boundary: boundary)
+    }
+
+    func makeTranscriptionRequest(audioURL: URL) throws -> URLRequest {
+        let key = try trimmedKey()
+        guard audioURL.scheme == "https", audioURL.host != nil else {
+            throw OpenRecError.invalidConfiguration("Grok needs a valid HTTPS recording URL.")
+        }
+        let boundary = "OpenRecGrok\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        let body = Self.multipartBody(
+            fields: [
+                ("model", Self.speechToTextModelID),
+                ("diarize", "true"),
+                ("url", audioURL.absoluteString),
+            ],
+            fileField: nil,
+            fileName: nil,
+            mimeType: nil,
+            fileData: nil,
+            boundary: boundary
+        )
+        return try Self.sttRequest(apiKey: key, body: body, boundary: boundary)
+    }
+
+    private func trimmedKey() throws -> String {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            throw OpenRecError.invalidConfiguration("Enter a Grok API key first.")
+        }
+        return key
+    }
+
+    private func decodeTranscript(_ data: Data) throws -> [DisplaySegment] {
+        let response: GrokSTTResponse
+        do {
+            response = try JSONDecoder().decode(GrokSTTResponse.self, from: data)
+        } catch {
+            throw OpenRecError.invalidResponse("Grok returned an unreadable transcript.")
+        }
+        return try GrokTranscriptMapper.displaySegments(from: response)
+    }
+
+    private static func sttRequest(apiKey: String, body: Data, boundary: String) throws -> URLRequest {
+        guard let url = URL(string: "https://api.x.ai/v1/stt") else {
+            throw OpenRecError.invalidConfiguration("Invalid Grok endpoint.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60 * 60
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        return request
+    }
+
+    private static func multipartBody(
+        fields: [(String, String)],
+        fileField: String?,
+        fileName: String?,
+        mimeType: String?,
+        fileData: Data?,
+        boundary: String
+    ) -> Data {
+        var body = Data()
+        let crlf = Data("\r\n".utf8)
+        for (name, value) in fields {
+            body.append(Data("--\(boundary)\r\n".utf8))
+            body.append(Data("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8))
+            body.append(Data(value.utf8))
+            body.append(crlf)
+        }
+        if let fileField, let fileName, let mimeType, let fileData {
+            body.append(Data("--\(boundary)\r\n".utf8))
+            body.append(Data(
+                "Content-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(fileName)\"\r\n".utf8
+            ))
+            body.append(Data("Content-Type: \(mimeType)\r\n\r\n".utf8))
+            body.append(fileData)
+            body.append(crlf)
+        }
+        body.append(Data("--\(boundary)--\r\n".utf8))
+        return body
+    }
+
+    private static func safeFileName(_ name: String) -> String {
+        let cleaned = name
+            .replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+        return cleaned.isEmpty ? "audio.m4a" : cleaned
+    }
+
+    private static func mimeType(for fileURL: URL) -> String {
+        switch fileURL.pathExtension.lowercased() {
+        case "m4a", "mp4": return "audio/mp4"
+        case "mp3": return "audio/mpeg"
+        case "wav": return "audio/wav"
+        case "aac": return "audio/aac"
+        case "flac": return "audio/flac"
+        case "ogg", "opus": return "audio/ogg"
+        case "webm": return "audio/webm"
+        default: return "application/octet-stream"
+        }
+    }
+}
+
+struct GrokSTTWord: Decodable, Equatable {
+    let text: String
+    let start: Double
+    let end: Double
+    let speaker: Int?
+}
+
+struct GrokSTTResponse: Decodable, Equatable {
+    let text: String?
+    let duration: Double?
+    let words: [GrokSTTWord]?
+}
+
+enum GrokTranscriptMapper {
+    static func displaySegments(from response: GrokSTTResponse) throws -> [DisplaySegment] {
+        var segments: [DisplaySegment] = []
+        var currentSpeaker: Int?
+        var currentTexts: [String] = []
+        var currentStart = 0.0
+        var hasTurn = false
+
+        func flush() {
+            let text = currentTexts.joined(separator: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return }
+            segments.append(DisplaySegment(
+                speakerLabel: speakerLabel(for: currentSpeaker),
+                text: text,
+                timestamp: max(0, currentStart)
+            ))
+        }
+
+        for word in response.words ?? [] {
+            let text = word.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            if !hasTurn {
+                hasTurn = true
+                currentSpeaker = word.speaker
+                currentStart = word.start
+                currentTexts = [text]
+                continue
+            }
+            if word.speaker == currentSpeaker {
+                currentTexts.append(text)
+            } else {
+                flush()
+                currentSpeaker = word.speaker
+                currentStart = word.start
+                currentTexts = [text]
+            }
+        }
+        if hasTurn { flush() }
+        if !segments.isEmpty { return segments }
+
+        if let text = response.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+            return [DisplaySegment(speakerLabel: "Conversation", text: text, timestamp: 0)]
+        }
+        throw OpenRecError.noSpeechDetected("Grok processed the recording but did not detect any spoken words.")
+    }
+
+    static func speakerLabel(for speaker: Int?) -> String {
+        guard let speaker else { return "Speaker" }
+        return "Speaker \(speaker)"
     }
 }
 

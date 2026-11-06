@@ -13,8 +13,15 @@ enum OpenRecOnboarding {
     static func currentReadiness() -> OnboardingReadiness {
         OnboardingReadiness(
             markedComplete: UserDefaults.standard.bool(forKey: completionKey),
-            assemblyKey: KeychainStore.string(for: "assemblyai-api-key"),
-            assemblyVerified: UserDefaults.standard.bool(forKey: "AssemblyAIKeyVerified"),
+            transcription: TranscriptionCredentials(
+                provider: TranscriptionProvider.resolved(
+                    from: UserDefaults.standard.string(forKey: TranscriptionProvider.defaultsKey)
+                ),
+                assemblyKey: KeychainStore.string(for: "assemblyai-api-key"),
+                assemblyVerified: UserDefaults.standard.bool(forKey: "AssemblyAIKeyVerified"),
+                grokKey: KeychainStore.string(for: MeetingMemoryProvider.grokKeychainAccount),
+                grokVerified: UserDefaults.standard.bool(forKey: MeetingMemoryProvider.grokVerifiedDefaultsKey)
+            ),
             meetingMemory: MeetingMemoryCredentials(
                 provider: MeetingMemoryProvider.resolved(
                     from: UserDefaults.standard.string(forKey: MeetingMemoryProvider.defaultsKey)
@@ -180,7 +187,7 @@ struct OpenRecOnboardingView: View {
         case .welcome:
             welcomePage
         case .assemblyAI:
-            assemblyAIPage
+            transcriptionPage
         case .meetingMemory:
             meetingMemoryPage
         case .storage:
@@ -229,44 +236,56 @@ struct OpenRecOnboardingView: View {
         }
     }
 
-    private var assemblyAIPage: some View {
-        OnboardingPageLayout(
+    private var transcriptionPage: some View {
+        let provider = recorderManager.transcriptionManager.transcriptionProvider
+        return OnboardingPageLayout(
             icon: "waveform",
-            title: "Connect AssemblyAI",
-            body: "Universal-3.5 Pro creates the transcript with speaker diarization. Your key stays in your Mac’s Keychain."
+            title: "Connect transcription",
+            body: "Pick AssemblyAI or Grok to create the transcript with speaker diarization. Your key stays in your Mac’s Keychain."
         ) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("AssemblyAI API key")
+                StorageChoiceRow(
+                    icon: "waveform",
+                    title: "AssemblyAI",
+                    detail: "\(TranscriptionProvider.assemblyAI.modelLabel) · speaker diarization",
+                    selected: provider == .assemblyAI
+                ) {
+                    recorderManager.transcriptionManager.transcriptionProvider = .assemblyAI
+                }
+                StorageChoiceRow(
+                    icon: "waveform",
+                    title: "Grok",
+                    detail: "\(TranscriptionProvider.grok.modelLabel) · speaker diarization",
+                    selected: provider == .grok
+                ) {
+                    recorderManager.transcriptionManager.transcriptionProvider = .grok
+                }
+
+                Text("\(provider.displayName) API key")
                     .onboardingLabel()
+                    .padding(.top, 4)
 
                 SecureField(
                     "",
-                    text: Binding(
-                        get: { recorderManager.transcriptionManager.assemblyAIAPIKey },
-                        set: { assemblyAIKeyChanged(to: $0) }
-                    ),
-                    prompt: Text("AssemblyAI API key").foregroundColor(onboardingPlaceholderColor)
+                    text: transcriptionKeyBinding,
+                    prompt: Text(transcriptionKeyPlaceholder).foregroundColor(onboardingPlaceholderColor)
                 )
                 .onboardingField()
+                .id(provider)
 
                 HStack(spacing: 10) {
                     OnboardingCheckStatus(
-                        state: assemblyAICheck,
+                        state: transcriptionCheck,
                         idleText: "Paste a key to verify automatically"
                     )
                     Spacer()
-                    Button("Test key") { testAssemblyAIKey() }
+                    Button("Test key") { testTranscriptionKey() }
                         .buttonStyle(.plain)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.white.opacity(0.7))
-                        .disabled(
-                            !recorderManager.transcriptionManager.hasAssemblyAIAPIKey
-                                || assemblyAICheck == .running
-                        )
+                        .disabled(!transcriptionHasKey || transcriptionCheck == .running)
                     Button("Create an API key") {
-                        if let url = URL(string: "https://www.assemblyai.com/dashboard/signup") {
-                            NSWorkspace.shared.open(url)
-                        }
+                        NSWorkspace.shared.open(transcriptionConsoleURL)
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 10, weight: .medium))
@@ -276,12 +295,67 @@ struct OpenRecOnboardingView: View {
         }
     }
 
+    private var transcriptionKeyBinding: Binding<String> {
+        switch recorderManager.transcriptionManager.transcriptionProvider {
+        case .assemblyAI:
+            return Binding(
+                get: { recorderManager.transcriptionManager.assemblyAIAPIKey },
+                set: { assemblyAIKeyChanged(to: $0) }
+            )
+        case .grok:
+            return Binding(
+                get: { recorderManager.transcriptionManager.xaiAPIKey },
+                set: { grokKeyChanged(to: $0) }
+            )
+        }
+    }
+
+    private var transcriptionKeyPlaceholder: String {
+        switch recorderManager.transcriptionManager.transcriptionProvider {
+        case .assemblyAI: return "AssemblyAI API key"
+        case .grok: return MeetingMemoryProvider.grok.keyPlaceholder
+        }
+    }
+
+    private var transcriptionConsoleURL: URL {
+        switch recorderManager.transcriptionManager.transcriptionProvider {
+        case .assemblyAI: return URL(string: "https://www.assemblyai.com/dashboard/signup")!
+        case .grok: return MeetingMemoryProvider.grok.consoleURL
+        }
+    }
+
+    private var transcriptionCheck: OnboardingConnectionCheck {
+        switch recorderManager.transcriptionManager.transcriptionProvider {
+        case .assemblyAI: return assemblyAICheck
+        case .grok: return grokCheck
+        }
+    }
+
+    private var transcriptionHasKey: Bool {
+        switch recorderManager.transcriptionManager.transcriptionProvider {
+        case .assemblyAI: return recorderManager.transcriptionManager.hasAssemblyAIAPIKey
+        case .grok: return recorderManager.transcriptionManager.hasXAIAPIKey
+        }
+    }
+
+    private func testTranscriptionKey() {
+        switch recorderManager.transcriptionManager.transcriptionProvider {
+        case .assemblyAI:
+            testAssemblyAIKey()
+        case .grok:
+            verifyGrokKey(
+                recorderManager.transcriptionManager.xaiAPIKey,
+                trigger: .immediate
+            )
+        }
+    }
+
     private var meetingMemoryPage: some View {
         let provider = recorderManager.transcriptionManager.meetingMemoryProvider
         return OnboardingPageLayout(
             icon: "key.fill",
             title: "Connect meeting memory",
-            body: "Pick OpenAI or Grok to turn the diarized transcript into summaries, decisions, and next steps. The chosen provider never handles transcription."
+            body: "Pick OpenAI or Grok to turn the diarized transcript into summaries, decisions, and next steps."
         ) {
             VStack(alignment: .leading, spacing: 10) {
                 StorageChoiceRow(
@@ -301,38 +375,54 @@ struct OpenRecOnboardingView: View {
                     recorderManager.transcriptionManager.meetingMemoryProvider = .grok
                 }
 
-                Text("\(provider.displayName) API key")
-                    .onboardingLabel()
-                    .padding(.top, 4)
-
-                SecureField(
-                    "",
-                    text: meetingMemoryKeyBinding,
-                    prompt: Text(provider.keyPlaceholder).foregroundColor(onboardingPlaceholderColor)
-                )
-                .onboardingField()
-                .id(provider)
-
-                HStack(spacing: 10) {
+                if reusesTranscriptionGrokKey {
+                    Text("Uses the Grok API key you verified for transcription.")
+                        .onboardingLabel()
+                        .padding(.top, 4)
                     OnboardingCheckStatus(
-                        state: meetingMemoryCheck,
+                        state: grokCheck == .idle ? .success("Key verified with Grok") : grokCheck,
                         idleText: "Paste a key to verify automatically"
                     )
-                    Spacer()
-                    Button("Test key") { testMeetingMemoryKey() }
+                } else {
+                    Text("\(provider.displayName) API key")
+                        .onboardingLabel()
+                        .padding(.top, 4)
+
+                    SecureField(
+                        "",
+                        text: meetingMemoryKeyBinding,
+                        prompt: Text(provider.keyPlaceholder).foregroundColor(onboardingPlaceholderColor)
+                    )
+                    .onboardingField()
+                    .id(provider)
+
+                    HStack(spacing: 10) {
+                        OnboardingCheckStatus(
+                            state: meetingMemoryCheck,
+                            idleText: "Paste a key to verify automatically"
+                        )
+                        Spacer()
+                        Button("Test key") { testMeetingMemoryKey() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.7))
+                            .disabled(!meetingMemoryHasKey || meetingMemoryCheck == .running)
+                        Button("Create an API key") {
+                            NSWorkspace.shared.open(provider.consoleURL)
+                        }
                         .buttonStyle(.plain)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.7))
-                        .disabled(!meetingMemoryHasKey || meetingMemoryCheck == .running)
-                    Button("Create an API key") {
-                        NSWorkspace.shared.open(provider.consoleURL)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white.opacity(0.58))
                     }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.white.opacity(0.58))
                 }
             }
         }
+    }
+
+    private var reusesTranscriptionGrokKey: Bool {
+        recorderManager.transcriptionManager.transcriptionProvider == .grok
+            && recorderManager.transcriptionManager.meetingMemoryProvider == .grok
+            && recorderManager.transcriptionManager.isXAIAPIKeyVerified
     }
 
     private var meetingMemoryKeyBinding: Binding<String> {
@@ -801,7 +891,7 @@ struct OpenRecOnboardingView: View {
     private var canContinue: Bool {
         switch step {
         case .assemblyAI:
-            recorderManager.transcriptionManager.isAssemblyAIAPIKeyVerified
+            recorderManager.transcriptionManager.isSelectedTranscriptionKeyVerified
         case .meetingMemory:
             recorderManager.transcriptionManager.isSelectedMeetingMemoryKeyVerified
         case .storage:

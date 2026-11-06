@@ -94,6 +94,32 @@ final class TranscriptionManager: ObservableObject {
         hasAssemblyAIAPIKey && UserDefaults.standard.bool(forKey: "AssemblyAIKeyVerified")
     }
 
+    var transcriptionProvider: TranscriptionProvider {
+        get {
+            TranscriptionProvider.resolved(
+                from: UserDefaults.standard.string(forKey: TranscriptionProvider.defaultsKey)
+            )
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: TranscriptionProvider.defaultsKey)
+            objectWillChange.send()
+        }
+    }
+
+    var transcriptionCredentials: TranscriptionCredentials {
+        TranscriptionCredentials(
+            provider: transcriptionProvider,
+            assemblyKey: assemblyAIAPIKey,
+            assemblyVerified: UserDefaults.standard.bool(forKey: "AssemblyAIKeyVerified"),
+            grokKey: xaiAPIKey,
+            grokVerified: UserDefaults.standard.bool(forKey: MeetingMemoryProvider.grokVerifiedDefaultsKey)
+        )
+    }
+
+    var isSelectedTranscriptionKeyVerified: Bool {
+        transcriptionCredentials.isSelectedKeyVerified
+    }
+
     var hasOpenAIAPIKey: Bool {
         !openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -168,14 +194,29 @@ final class TranscriptionManager: ObservableObject {
     func getAudioMixer() -> AudioMixer? { audioMixer }
 
     func transcribeRecording(audioURL: URL) async throws {
-        guard hasAssemblyAIAPIKey else {
-            throw OpenRecError.invalidConfiguration("Add your AssemblyAI API key before recording.")
+        try await transcribe(localFile: audioURL)
+    }
+
+    func transcribeCloudRecording(audioURL: URL) async throws {
+        try await transcribe(remoteAudioURL: audioURL)
+    }
+
+    private func transcribe(localFile audioURL: URL) async throws {
+        let credentials = transcriptionCredentials
+        guard credentials.hasSelectedKey else {
+            throw OpenRecError.invalidConfiguration(credentials.provider.missingKeyConfigurationMessage)
         }
         isTranscribing = true
         error = nil
         defer { isTranscribing = false }
         do {
-            let segments = try await AssemblyAIService(apiKey: assemblyAIAPIKey).transcribe(fileURL: audioURL)
+            let segments: [DisplaySegment]
+            switch credentials.provider {
+            case .assemblyAI:
+                segments = try await AssemblyAIService(apiKey: assemblyAIAPIKey).transcribe(fileURL: audioURL)
+            case .grok:
+                segments = try await GrokService(apiKey: xaiAPIKey).transcribe(fileURL: audioURL)
+            }
             committedSegments = segments
             partialText = ""
         } catch {
@@ -184,15 +225,22 @@ final class TranscriptionManager: ObservableObject {
         }
     }
 
-    func transcribeCloudRecording(audioURL: URL) async throws {
-        guard hasAssemblyAIAPIKey else {
-            throw OpenRecError.invalidConfiguration("Add your AssemblyAI API key before recording.")
+    private func transcribe(remoteAudioURL audioURL: URL) async throws {
+        let credentials = transcriptionCredentials
+        guard credentials.hasSelectedKey else {
+            throw OpenRecError.invalidConfiguration(credentials.provider.missingKeyConfigurationMessage)
         }
         isTranscribing = true
         error = nil
         defer { isTranscribing = false }
         do {
-            let segments = try await AssemblyAIService(apiKey: assemblyAIAPIKey).transcribe(audioURL: audioURL)
+            let segments: [DisplaySegment]
+            switch credentials.provider {
+            case .assemblyAI:
+                segments = try await AssemblyAIService(apiKey: assemblyAIAPIKey).transcribe(audioURL: audioURL)
+            case .grok:
+                segments = try await GrokService(apiKey: xaiAPIKey).transcribe(audioURL: audioURL)
+            }
             committedSegments = segments
             partialText = ""
         } catch {
