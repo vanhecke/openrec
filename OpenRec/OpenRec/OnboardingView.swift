@@ -261,6 +261,18 @@ struct OpenRecOnboardingView: View {
                     recorderManager.transcriptionManager.transcriptionProvider = .grok
                 }
 
+                if provider == .grok {
+                    Text("Language")
+                        .onboardingLabel()
+                        .padding(.top, 4)
+                    GrokLanguageOnboardingMenu(
+                        language: Binding(
+                            get: { recorderManager.transcriptionManager.grokTranscriptionLanguage },
+                            set: { recorderManager.transcriptionManager.grokTranscriptionLanguage = $0 }
+                        )
+                    )
+                }
+
                 Text("\(provider.displayName) API key")
                     .onboardingLabel()
                     .padding(.top, 4)
@@ -1271,6 +1283,56 @@ private struct OnboardingPageLayout<Content: View>: View {
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundColor(.white.opacity(0.86))
         }
+    }
+}
+
+private struct GrokLanguageOnboardingMenu: View {
+    @Binding var language: GrokTranscriptionLanguage
+
+    var body: some View {
+        Menu {
+            ForEach(GrokTranscriptionLanguage.allCases) { option in
+                Button {
+                    language = option
+                } label: {
+                    if option == language {
+                        Label(option.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(option.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 11) {
+                Image(systemName: "globe")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.9))
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(language.displayName)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.88))
+                    Text(language.pickerDetail)
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.44))
+                }
+                Spacer()
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 52)
+            .background(Color.white.opacity(0.1))
+            .cornerRadius(9)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel("Grok transcription language")
     }
 }
 

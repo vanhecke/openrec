@@ -278,6 +278,192 @@ final class GrokServiceTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(apiKey)")
     }
 
+    func testFileAutoDetectOmitsLanguageAndFormat() throws {
+        let audioURL = try temporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL.deletingLastPathComponent()) }
+
+        let request = try GrokService(apiKey: apiKey).makeTranscriptionRequest(fileURL: audioURL)
+        let body = try bodyData(from: request)
+
+        XCTAssertEqual(request.url?.absoluteString, "https://api.x.ai/v1/stt")
+        assertField("model", equals: "grok-voice-transcribe-2.0", in: body)
+        assertField("diarize", equals: "true", in: body)
+        assertAbsent("language", in: body)
+        assertAbsent("format", in: body)
+        assertFieldOrder(["model", "diarize", "file"], in: body)
+        assertLastMultipartField(named: "file", in: body)
+    }
+
+    func testFileEnglishSendsLanguageAndFormatWithFileLast() throws {
+        let audioURL = try temporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL.deletingLastPathComponent()) }
+
+        let request = try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+            fileURL: audioURL,
+            language: .english
+        )
+        let body = try bodyData(from: request)
+
+        assertField("model", equals: "grok-voice-transcribe-2.0", in: body)
+        assertField("diarize", equals: "true", in: body)
+        assertField("language", equals: "en", in: body)
+        assertField("format", equals: "true", in: body)
+        assertFieldOrder(["model", "diarize", "language", "format", "file"], in: body)
+        assertLastMultipartField(named: "file", in: body)
+    }
+
+    func testFileThaiSendsLanguageAndFormatEvenThoughFormattingIsANoOp() throws {
+        let audioURL = try temporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL.deletingLastPathComponent()) }
+
+        let body = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                fileURL: audioURL,
+                language: .thai
+            )
+        )
+
+        assertField("language", equals: "th", in: body)
+        assertField("format", equals: "true", in: body)
+        assertField("model", equals: "grok-voice-transcribe-2.0", in: body)
+        assertField("diarize", equals: "true", in: body)
+        assertLastMultipartField(named: "file", in: body)
+    }
+
+    func testEmptyFileIsStillRejectedWhenALanguageIsChosen() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GrokSTT-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioURL = directory.appendingPathComponent("empty.m4a")
+        try Data().write(to: audioURL)
+
+        XCTAssertThrowsError(
+            try GrokService(apiKey: apiKey).makeTranscriptionRequest(fileURL: audioURL, language: .english)
+        ) { error in
+            guard case OpenRecError.recordingFailed = error else {
+                return XCTFail("Expected recordingFailed, got \(error)")
+            }
+        }
+    }
+
+    func testURLAutoDetectOmitsLanguageAndFormat() throws {
+        let audioURL = try XCTUnwrap(URL(string: "https://example.com/calls/audio.m4a?sig=1"))
+        let body = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(audioURL: audioURL)
+        )
+
+        assertField("model", equals: "grok-voice-transcribe-2.0", in: body)
+        assertField("diarize", equals: "true", in: body)
+        assertField("url", equals: audioURL.absoluteString, in: body)
+        assertAbsent("language", in: body)
+        assertAbsent("format", in: body)
+        assertAbsent("file", in: body)
+        assertFieldOrder(["model", "diarize", "url"], in: body)
+        assertLastMultipartField(named: "url", in: body)
+    }
+
+    func testURLEnglishSendsLanguageAndFormat() throws {
+        let audioURL = try XCTUnwrap(URL(string: "https://example.com/calls/audio.m4a?sig=1"))
+        let body = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                audioURL: audioURL,
+                language: .english
+            )
+        )
+
+        assertField("language", equals: "en", in: body)
+        assertField("format", equals: "true", in: body)
+        assertField("url", equals: audioURL.absoluteString, in: body)
+        assertField("model", equals: "grok-voice-transcribe-2.0", in: body)
+        assertField("diarize", equals: "true", in: body)
+        assertAbsent("file", in: body)
+        assertFieldOrder(["model", "diarize", "language", "format", "url"], in: body)
+        assertLastMultipartField(named: "url", in: body)
+    }
+
+    func testURLThaiSendsLanguageAndFormatEvenThoughFormattingIsANoOp() throws {
+        let audioURL = try XCTUnwrap(URL(string: "https://example.com/calls/audio.m4a"))
+        let body = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                audioURL: audioURL,
+                language: .thai
+            )
+        )
+
+        assertField("language", equals: "th", in: body)
+        assertField("format", equals: "true", in: body)
+        assertField("url", equals: audioURL.absoluteString, in: body)
+        assertLastMultipartField(named: "url", in: body)
+        assertAbsent("file", in: body)
+    }
+
+    func testMissingLanguagePreferenceIsAutoDetectAndRoundTrips() throws {
+        let suite = "OpenRecGrokLanguage-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertNil(defaults.string(forKey: GrokTranscriptionLanguage.defaultsKey))
+        XCTAssertEqual(GrokTranscriptionLanguage.resolved(from: nil), .autoDetect)
+        XCTAssertEqual(GrokTranscriptionLanguage.resolved(from: ""), .autoDetect)
+        XCTAssertEqual(GrokTranscriptionLanguage.resolved(from: "es-MX"), .autoDetect)
+        XCTAssertEqual(GrokTranscriptionLanguage.stored(in: defaults), .autoDetect)
+        XCTAssertNil(GrokTranscriptionLanguage.autoDetect.languageCode)
+
+        GrokTranscriptionLanguage.english.store(in: defaults)
+        XCTAssertEqual(defaults.string(forKey: GrokTranscriptionLanguage.defaultsKey), "en")
+        XCTAssertEqual(GrokTranscriptionLanguage.stored(in: defaults), .english)
+        XCTAssertEqual(GrokTranscriptionLanguage.stored(in: defaults).languageCode, "en")
+
+        let audioURL = try temporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL.deletingLastPathComponent()) }
+        let chosen = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                fileURL: audioURL,
+                language: GrokTranscriptionLanguage.stored(in: defaults)
+            )
+        )
+        assertField("language", equals: "en", in: chosen)
+        assertField("format", equals: "true", in: chosen)
+        assertLastMultipartField(named: "file", in: chosen)
+
+        GrokTranscriptionLanguage.autoDetect.store(in: defaults)
+        XCTAssertEqual(defaults.string(forKey: GrokTranscriptionLanguage.defaultsKey), "auto")
+        XCTAssertEqual(GrokTranscriptionLanguage.stored(in: defaults), .autoDetect)
+        let restoredURL = try XCTUnwrap(URL(string: "https://example.com/audio.m4a"))
+        let restored = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                audioURL: restoredURL,
+                language: GrokTranscriptionLanguage.stored(in: defaults)
+            )
+        )
+        assertAbsent("language", in: restored)
+        assertAbsent("format", in: restored)
+        assertField("model", equals: "grok-voice-transcribe-2.0", in: restored)
+        assertField("diarize", equals: "true", in: restored)
+        assertField("url", equals: restoredURL.absoluteString, in: restored)
+    }
+
+    func testPickerUsesOfficialBaseLanguageCodes() {
+        XCTAssertEqual(GrokTranscriptionLanguage.allCases.first, .autoDetect)
+        XCTAssertEqual(GrokTranscriptionLanguage.autoDetect.displayName, "Auto-Detect")
+        XCTAssertEqual(
+            GrokTranscriptionLanguage.allCases.compactMap(\.languageCode),
+            [
+                "ar", "bs", "bg", "yue", "ca", "zh", "hr", "cs", "da", "nl",
+                "en", "fil", "fi", "fr", "de", "el", "hi", "hu", "id", "it",
+                "ja", "ko", "mk", "ms", "nb", "fa", "pl", "pt", "ro", "ru",
+                "sk", "es", "sv", "th", "tr", "uk", "ur", "vi",
+            ]
+        )
+        XCTAssertEqual(GrokTranscriptionLanguage.chineseMandarin.displayName, "Chinese (Mandarin)")
+        XCTAssertEqual(GrokTranscriptionLanguage.norwegianBokmal.displayName, "Norwegian (Bokmål)")
+        XCTAssertEqual(GrokTranscriptionLanguage.spanish.languageCode, "es")
+        XCTAssertEqual(GrokTranscriptionLanguage.portuguese.languageCode, "pt")
+        XCTAssertEqual(GrokTranscriptionLanguage.arabic.languageCode, "ar")
+    }
+
     func testTranscribeMapsADiarizedFixtureFromTheSTTEndpoint() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("GrokSTTLive-\(UUID().uuidString)", isDirectory: true)
@@ -342,6 +528,89 @@ final class GrokServiceTests: XCTestCase {
         XCTAssertEqual(grok.title, "Ship the notes")
         XCTAssertEqual(openai.title, "Ship the notes")
         XCTAssertEqual(openai.actionItems[0].task, "Write the notes")
+    }
+
+    private func temporaryAudioFile() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GrokSTT-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let audioURL = directory.appendingPathComponent("call.m4a")
+        try Data("not-a-real-recording".utf8).write(to: audioURL)
+        return audioURL
+    }
+
+    private func assertField(
+        _ name: String,
+        equals value: String,
+        in body: Data,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        let needle = Data("name=\"\(name)\"\r\n\r\n\(value)\r\n".utf8)
+        XCTAssertNotNil(body.range(of: needle), "Missing \(name)=\(value)", file: file, line: line)
+    }
+
+    private func assertAbsent(
+        _ name: String,
+        in body: Data,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        XCTAssertNil(
+            body.range(of: Data("name=\"\(name)\"".utf8)),
+            "Unexpected field \(name)",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertFieldOrder(
+        _ names: [String],
+        in body: Data,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        var previous: Data.Index?
+        for name in names {
+            guard let index = body.range(of: Data("name=\"\(name)\"".utf8))?.lowerBound else {
+                XCTFail("Missing field \(name)", file: file, line: line)
+                return
+            }
+            if let previous {
+                XCTAssertLessThan(previous, index, "\(name) is out of order", file: file, line: line)
+            }
+            previous = index
+        }
+    }
+
+    /// The file part is `name="file"; filename="..."`. A search for `name="`
+    /// also matches the `name="` inside `filename=`, so match the form-data
+    /// parameter `; name="` and read the quoted field name that follows it.
+    private func assertLastMultipartField(
+        named name: String,
+        in body: Data,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        let needle = Data("; name=\"".utf8)
+        var lastValue: Data.Index?
+        var search = body.startIndex
+        while let range = body.range(of: needle, in: search..<body.endIndex) {
+            lastValue = range.upperBound
+            search = range.upperBound
+        }
+        guard let lastValue else {
+            XCTFail("Expected multipart fields", file: file, line: line)
+            return
+        }
+        let expected = Data("\(name)\"".utf8)
+        let observed = String(data: body[lastValue...].prefix(32), encoding: .utf8) ?? "<binary>"
+        XCTAssertTrue(
+            body[lastValue...].starts(with: expected),
+            "Last field was not \(name); found \(observed)",
+            file: file,
+            line: line
+        )
     }
 
     private func bodyData(from request: URLRequest) throws -> Data {

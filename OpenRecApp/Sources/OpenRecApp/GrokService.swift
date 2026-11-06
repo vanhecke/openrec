@@ -213,8 +213,11 @@ struct GrokService {
         return flattened
     }
 
-    func transcribe(fileURL: URL) async throws -> [DisplaySegment] {
-        let request = try makeTranscriptionRequest(fileURL: fileURL)
+    func transcribe(
+        fileURL: URL,
+        language: GrokTranscriptionLanguage = .autoDetect
+    ) async throws -> [DisplaySegment] {
+        let request = try makeTranscriptionRequest(fileURL: fileURL, language: language)
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
         return try decodeTranscript(data)
@@ -222,14 +225,20 @@ struct GrokService {
 
     /// Transcribe media that is already in private cloud storage through a
     /// short-lived HTTPS URL. xAI downloads it server-side.
-    func transcribe(audioURL: URL) async throws -> [DisplaySegment] {
-        let request = try makeTranscriptionRequest(audioURL: audioURL)
+    func transcribe(
+        audioURL: URL,
+        language: GrokTranscriptionLanguage = .autoDetect
+    ) async throws -> [DisplaySegment] {
+        let request = try makeTranscriptionRequest(audioURL: audioURL, language: language)
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
         return try decodeTranscript(data)
     }
 
-    func makeTranscriptionRequest(fileURL: URL) throws -> URLRequest {
+    func makeTranscriptionRequest(
+        fileURL: URL,
+        language: GrokTranscriptionLanguage = .autoDetect
+    ) throws -> URLRequest {
         let key = try trimmedKey()
         guard fileURL.isFileURL, FileManager.default.fileExists(atPath: fileURL.path) else {
             throw OpenRecError.invalidConfiguration("The recording for transcription is missing.")
@@ -245,10 +254,7 @@ struct GrokService {
         let fileName = Self.safeFileName(fileURL.lastPathComponent)
         let boundary = "OpenRecGrok\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
         let body = Self.multipartBody(
-            fields: [
-                ("model", Self.speechToTextModelID),
-                ("diarize", "true"),
-            ],
+            fields: Self.transcriptionFields(language: language),
             fileField: "file",
             fileName: fileName,
             mimeType: Self.mimeType(for: fileURL),
@@ -258,18 +264,17 @@ struct GrokService {
         return try Self.sttRequest(apiKey: key, body: body, boundary: boundary)
     }
 
-    func makeTranscriptionRequest(audioURL: URL) throws -> URLRequest {
+    func makeTranscriptionRequest(
+        audioURL: URL,
+        language: GrokTranscriptionLanguage = .autoDetect
+    ) throws -> URLRequest {
         let key = try trimmedKey()
         guard audioURL.scheme == "https", audioURL.host != nil else {
             throw OpenRecError.invalidConfiguration("Grok needs a valid HTTPS recording URL.")
         }
         let boundary = "OpenRecGrok\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
         let body = Self.multipartBody(
-            fields: [
-                ("model", Self.speechToTextModelID),
-                ("diarize", "true"),
-                ("url", audioURL.absoluteString),
-            ],
+            fields: Self.transcriptionFields(language: language, url: audioURL.absoluteString),
             fileField: nil,
             fileName: nil,
             mimeType: nil,
@@ -277,6 +282,28 @@ struct GrokService {
             boundary: boundary
         )
         return try Self.sttRequest(apiKey: key, body: body, boundary: boundary)
+    }
+
+    /// Auto-Detect omits `language` and `format`. A chosen language sends both.
+    /// `format=true` without `language` is HTTP 400. Formatting is a no-op in
+    /// languages without coverage, including Thai, and is still sent.
+    /// `file` is appended after these fields so it stays last.
+    private static func transcriptionFields(
+        language: GrokTranscriptionLanguage,
+        url: String? = nil
+    ) -> [(String, String)] {
+        var fields: [(String, String)] = [
+            ("model", speechToTextModelID),
+            ("diarize", "true"),
+        ]
+        if let languageCode = language.languageCode {
+            fields.append(("language", languageCode))
+            fields.append(("format", "true"))
+        }
+        if let url {
+            fields.append(("url", url))
+        }
+        return fields
     }
 
     private func trimmedKey() throws -> String {

@@ -298,6 +298,128 @@ enum TranscriptionProvider: String, CaseIterable, Identifiable {
     }
 }
 
+/// Language sent to grok-voice-transcribe-2.0.
+/// A missing or unknown stored value is Auto-Detect: the request omits both
+/// `language` and `format`, so the model follows mid-call language switches.
+/// A chosen language sends `language` and `format=true` together.
+enum GrokTranscriptionLanguage: String, CaseIterable, Identifiable {
+    case autoDetect = "auto"
+    case arabic = "ar"
+    case bosnian = "bs"
+    case bulgarian = "bg"
+    case cantonese = "yue"
+    case catalan = "ca"
+    case chineseMandarin = "zh"
+    case croatian = "hr"
+    case czech = "cs"
+    case danish = "da"
+    case dutch = "nl"
+    case english = "en"
+    case filipino = "fil"
+    case finnish = "fi"
+    case french = "fr"
+    case german = "de"
+    case greek = "el"
+    case hindi = "hi"
+    case hungarian = "hu"
+    case indonesian = "id"
+    case italian = "it"
+    case japanese = "ja"
+    case korean = "ko"
+    case macedonian = "mk"
+    case malay = "ms"
+    case norwegianBokmal = "nb"
+    case persian = "fa"
+    case polish = "pl"
+    case portuguese = "pt"
+    case romanian = "ro"
+    case russian = "ru"
+    case slovak = "sk"
+    case spanish = "es"
+    case swedish = "sv"
+    case thai = "th"
+    case turkish = "tr"
+    case ukrainian = "uk"
+    case urdu = "ur"
+    case vietnamese = "vi"
+
+    static let defaultsKey = "GrokTranscriptionLanguage"
+
+    var id: String { rawValue }
+
+    /// Code for the `language` field. Nil means Auto-Detect: omit `language`
+    /// and `format`. `format=true` without `language` is rejected.
+    var languageCode: String? {
+        self == .autoDetect ? nil : rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .autoDetect: return "Auto-Detect"
+        case .arabic: return "Arabic"
+        case .bosnian: return "Bosnian"
+        case .bulgarian: return "Bulgarian"
+        case .cantonese: return "Cantonese"
+        case .catalan: return "Catalan"
+        case .chineseMandarin: return "Chinese (Mandarin)"
+        case .croatian: return "Croatian"
+        case .czech: return "Czech"
+        case .danish: return "Danish"
+        case .dutch: return "Dutch"
+        case .english: return "English"
+        case .filipino: return "Filipino"
+        case .finnish: return "Finnish"
+        case .french: return "French"
+        case .german: return "German"
+        case .greek: return "Greek"
+        case .hindi: return "Hindi"
+        case .hungarian: return "Hungarian"
+        case .indonesian: return "Indonesian"
+        case .italian: return "Italian"
+        case .japanese: return "Japanese"
+        case .korean: return "Korean"
+        case .macedonian: return "Macedonian"
+        case .malay: return "Malay"
+        case .norwegianBokmal: return "Norwegian (Bokmål)"
+        case .persian: return "Persian"
+        case .polish: return "Polish"
+        case .portuguese: return "Portuguese"
+        case .romanian: return "Romanian"
+        case .russian: return "Russian"
+        case .slovak: return "Slovak"
+        case .spanish: return "Spanish"
+        case .swedish: return "Swedish"
+        case .thai: return "Thai"
+        case .turkish: return "Turkish"
+        case .ukrainian: return "Ukrainian"
+        case .urdu: return "Urdu"
+        case .vietnamese: return "Vietnamese"
+        }
+    }
+
+    var pickerDetail: String {
+        if languageCode == nil {
+            return "Follows mid-call language switches"
+        }
+        return "Prefers this language"
+    }
+
+    static func resolved(from stored: String?) -> GrokTranscriptionLanguage {
+        guard let stored, let language = GrokTranscriptionLanguage(rawValue: stored) else {
+            return .autoDetect
+        }
+        return language
+    }
+
+    static func stored(in defaults: UserDefaults = .standard) -> GrokTranscriptionLanguage {
+        resolved(from: defaults.string(forKey: defaultsKey))
+    }
+
+    func store(in defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: Self.defaultsKey)
+    }
+}
+
 struct TranscriptionCredentials: Equatable {
     var provider: TranscriptionProvider
     var assemblyKey: String
