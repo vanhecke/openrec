@@ -139,10 +139,10 @@ final class AIPromptStoreTests: XCTestCase {
             callTitle: "Maya sync",
             defaults: defaults
         )
-        let messages = try messages(in: body)
-        XCTAssertEqual(messages.first?["content"] as? String, custom)
-        XCTAssertTrue((messages.last?["content"] as? String)?.contains("Speaker A, Speaker 0") == true)
-        XCTAssertTrue((messages.last?["content"] as? String)?.contains(transcript) == true)
+        let speakerMessages = try messages(in: body)
+        XCTAssertEqual(speakerMessages.first?["content"] as? String, custom)
+        XCTAssertTrue((speakerMessages.last?["content"] as? String)?.contains("Speaker A, Speaker 0") == true)
+        XCTAssertTrue((speakerMessages.last?["content"] as? String)?.contains(transcript) == true)
         XCTAssertNil(body["search_parameters"])
         XCTAssertNil(body["reasoning_effort"])
         let schema = ((body["response_format"] as? [String: Any])?["json_schema"] as? [String: Any])
