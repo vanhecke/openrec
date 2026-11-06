@@ -344,12 +344,13 @@ final class RecorderManager: ObservableObject {
             lastErrorMessage = "Open Settings and test your AssemblyAI API key before recording."
             return
         }
-        guard transcriptionManager.hasOpenAIAPIKey else {
-            lastErrorMessage = "Open Settings and add your OpenAI API key for meeting summaries and next steps."
+        let meetingMemory = transcriptionManager.meetingMemoryCredentials
+        guard meetingMemory.hasSelectedKey else {
+            lastErrorMessage = meetingMemory.provider.missingKeySettingsMessage
             return
         }
-        guard transcriptionManager.isOpenAIAPIKeyVerified else {
-            lastErrorMessage = "Open Settings and test your OpenAI API key before recording."
+        guard meetingMemory.isSelectedKeyVerified else {
+            lastErrorMessage = meetingMemory.provider.unverifiedKeySettingsMessage
             return
         }
         guard cloudStorage.isReady else {
@@ -1271,14 +1272,13 @@ final class RecorderManager: ObservableObject {
         _ transcript: String,
         callTitle: String?
     ) async throws -> MeetingInsights {
-        guard transcriptionManager.hasOpenAIAPIKey else {
-            throw OpenRecError.invalidConfiguration("Add your OpenAI API key to generate meeting memory.")
-        }
         transcriptionManager.isAnalyzing = true
         defer { transcriptionManager.isAnalyzing = false }
         do {
-            let generated = try await OpenAIService(apiKey: transcriptionManager.openAIAPIKey)
-                .generateInsights(transcript: transcript, callTitle: callTitle)
+            let generated = try await transcriptionManager.generateInsights(
+                transcript: transcript,
+                callTitle: callTitle
+            )
             transcriptionManager.insights = generated
             return generated
         } catch {

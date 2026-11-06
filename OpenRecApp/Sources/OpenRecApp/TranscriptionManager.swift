@@ -51,13 +51,37 @@ final class TranscriptionManager: ObservableObject {
     }
 
     var openAIAPIKey: String {
-        get { KeychainStore.string(for: "openai-api-key") }
+        get { KeychainStore.string(for: MeetingMemoryProvider.openAIKeychainAccount) }
         set {
             let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
             let changed = normalized
                 != openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            KeychainStore.set(normalized, for: "openai-api-key")
-            if changed { UserDefaults.standard.set(false, forKey: "OpenAIKeyVerified") }
+            KeychainStore.set(normalized, for: MeetingMemoryProvider.openAIKeychainAccount)
+            if changed { UserDefaults.standard.set(false, forKey: MeetingMemoryProvider.openAIVerifiedDefaultsKey) }
+            objectWillChange.send()
+        }
+    }
+
+    var xaiAPIKey: String {
+        get { KeychainStore.string(for: MeetingMemoryProvider.grokKeychainAccount) }
+        set {
+            let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let changed = normalized
+                != xaiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            KeychainStore.set(normalized, for: MeetingMemoryProvider.grokKeychainAccount)
+            if changed { UserDefaults.standard.set(false, forKey: MeetingMemoryProvider.grokVerifiedDefaultsKey) }
+            objectWillChange.send()
+        }
+    }
+
+    var meetingMemoryProvider: MeetingMemoryProvider {
+        get {
+            MeetingMemoryProvider.resolved(
+                from: UserDefaults.standard.string(forKey: MeetingMemoryProvider.defaultsKey)
+            )
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: MeetingMemoryProvider.defaultsKey)
             objectWillChange.send()
         }
     }
@@ -75,7 +99,29 @@ final class TranscriptionManager: ObservableObject {
     }
 
     var isOpenAIAPIKeyVerified: Bool {
-        hasOpenAIAPIKey && UserDefaults.standard.bool(forKey: "OpenAIKeyVerified")
+        hasOpenAIAPIKey && UserDefaults.standard.bool(forKey: MeetingMemoryProvider.openAIVerifiedDefaultsKey)
+    }
+
+    var hasXAIAPIKey: Bool {
+        !xaiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var isXAIAPIKeyVerified: Bool {
+        hasXAIAPIKey && UserDefaults.standard.bool(forKey: MeetingMemoryProvider.grokVerifiedDefaultsKey)
+    }
+
+    var meetingMemoryCredentials: MeetingMemoryCredentials {
+        MeetingMemoryCredentials(
+            provider: meetingMemoryProvider,
+            openAIKey: openAIAPIKey,
+            openAIVerified: UserDefaults.standard.bool(forKey: MeetingMemoryProvider.openAIVerifiedDefaultsKey),
+            grokKey: xaiAPIKey,
+            grokVerified: UserDefaults.standard.bool(forKey: MeetingMemoryProvider.grokVerifiedDefaultsKey)
+        )
+    }
+
+    var isSelectedMeetingMemoryKeyVerified: Bool {
+        meetingMemoryCredentials.isSelectedKeyVerified
     }
 
     func startLiveTranscription() {
@@ -158,22 +204,29 @@ final class TranscriptionManager: ObservableObject {
     func analyze(callTitle: String?) async throws -> MeetingInsights {
         let transcript = fullTranscriptText()
         guard !transcript.isEmpty else { return MeetingInsights() }
-        guard hasOpenAIAPIKey else {
-            throw OpenRecError.invalidConfiguration("Add your OpenAI API key to generate meeting memory.")
-        }
         isAnalyzing = true
         defer { isAnalyzing = false }
         do {
-            let value = try await OpenAIService(apiKey: openAIAPIKey).generateInsights(
-                transcript: transcript,
-                callTitle: callTitle
-            )
+            let value = try await generateInsights(transcript: transcript, callTitle: callTitle)
             insights = value
             return value
         } catch {
             self.error = error.localizedDescription
             throw error
         }
+    }
+
+    func generateInsights(transcript: String, callTitle: String?) async throws -> MeetingInsights {
+        let credentials = meetingMemoryCredentials
+        guard credentials.hasSelectedKey else {
+            throw OpenRecError.invalidConfiguration(credentials.provider.missingKeyConfigurationMessage)
+        }
+        return try await MeetingMemoryClient.generateInsights(
+            provider: credentials.provider,
+            apiKey: credentials.selectedKey,
+            transcript: transcript,
+            callTitle: callTitle
+        )
     }
 
     func saveTranscript(to directory: URL, baseName: String) throws {

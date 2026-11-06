@@ -42,11 +42,13 @@ struct OpenRecSettingsView: View {
     @State private var section: SettingsSection = .account
     @State private var assemblyAICheck: ConnectionCheck = .idle
     @State private var openAICheck: ConnectionCheck = .idle
+    @State private var grokCheck: ConnectionCheck = .idle
     @State private var r2Check: ConnectionCheck = .idle
     @State private var webhookCheck: ConnectionCheck = .idle
     @State private var calendarCheck: CalendarConnectionCheck = .idle
     @StateObject private var assemblyAIKeyVerifier = APIKeyAutoVerifier()
     @StateObject private var openAIKeyVerifier = APIKeyAutoVerifier()
+    @StateObject private var grokKeyVerifier = APIKeyAutoVerifier()
     @State private var microphoneGranted = false
     @State private var screenGranted = false
 
@@ -78,6 +80,9 @@ struct OpenRecSettingsView: View {
             }
             if recorderManager.transcriptionManager.isOpenAIAPIKeyVerified {
                 openAICheck = .success("Key verified with OpenAI")
+            }
+            if recorderManager.transcriptionManager.isXAIAPIKeyVerified {
+                grokCheck = .success("Key verified with Grok")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -166,7 +171,7 @@ struct OpenRecSettingsView: View {
     private var sectionDescription: String {
         switch section {
         case .account: return "Choose the private home for meeting memory and recordings."
-        case .aiModels: return "AssemblyAI transcribes each call; OpenAI turns it into useful meeting memory."
+        case .aiModels: return "AssemblyAI transcribes each call; OpenAI or Grok turns it into useful meeting memory."
         case .recording: return "Set defaults for new calls. During-call changes apply only to that call."
         case .integrations: return "Deliver completed meeting metadata and recordings to your systems."
         case .permissions: return "OpenRec only captures your screen and microphone while recording."
@@ -386,6 +391,31 @@ struct OpenRecSettingsView: View {
 
     private var aiModelsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
+            SettingsCard(title: "Meeting memory") {
+                VStack(spacing: 8) {
+                    Text("AssemblyAI still transcribes. Pick which provider writes summaries, decisions, and next steps.")
+                        .font(.system(size: 10))
+                        .foregroundColor(secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    StorageSettingsChoice(
+                        icon: "sparkles",
+                        title: "OpenAI",
+                        detail: MeetingMemoryProvider.openai.modelID,
+                        selected: recorderManager.transcriptionManager.meetingMemoryProvider == .openai
+                    ) {
+                        recorderManager.transcriptionManager.meetingMemoryProvider = .openai
+                    }
+                    StorageSettingsChoice(
+                        icon: "sparkles",
+                        title: "Grok",
+                        detail: MeetingMemoryProvider.grok.modelID,
+                        selected: recorderManager.transcriptionManager.meetingMemoryProvider == .grok
+                    ) {
+                        recorderManager.transcriptionManager.meetingMemoryProvider = .grok
+                    }
+                }
+            }
+
             SettingsCard(title: "Transcription · AssemblyAI") {
                 VStack(alignment: .leading, spacing: 10) {
                     SettingsSecureField(
@@ -446,6 +476,36 @@ struct OpenRecSettingsView: View {
                         idleText: "Paste to verify automatically · used only for meeting memory"
                     ) {
                         testOpenAI()
+                    }
+                }
+            }
+
+            SettingsCard(title: "Meeting memory · Grok") {
+                VStack(alignment: .leading, spacing: 10) {
+                    SettingsSecureField(
+                        prompt: MeetingMemoryProvider.grok.keyPlaceholder,
+                        text: Binding(
+                            get: { recorderManager.transcriptionManager.xaiAPIKey },
+                            set: { grokKeyChanged(to: $0) }
+                        )
+                    )
+                    HStack(spacing: 8) {
+                        Label(MeetingMemoryProvider.grok.modelID, systemImage: "sparkles")
+                        Text("·")
+                        Text("summaries, decisions, and next steps")
+                        Spacer()
+                        Button("Create API key") {
+                            NSWorkspace.shared.open(MeetingMemoryProvider.grok.consoleURL)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(secondary)
+                    SettingsTestRow(
+                        state: grokCheck,
+                        idleText: "Paste to verify automatically · used only for meeting memory"
+                    ) {
+                        testGrok()
                     }
                 }
             }
@@ -635,13 +695,52 @@ struct OpenRecSettingsView: View {
                 switch result {
                 case .success:
                     recorderManager.transcriptionManager.openAIAPIKey = normalizedKey
-                    UserDefaults.standard.set(true, forKey: "OpenAIKeyVerified")
+                    UserDefaults.standard.set(true, forKey: MeetingMemoryProvider.openAIVerifiedDefaultsKey)
                     openAICheck = .success("Key verified with OpenAI")
                 case .failure(let error):
                     if OpenAIService.isCredentialOrModelAccessFailure(error) {
-                        UserDefaults.standard.set(false, forKey: "OpenAIKeyVerified")
+                        UserDefaults.standard.set(false, forKey: MeetingMemoryProvider.openAIVerifiedDefaultsKey)
                     }
                     openAICheck = .failure(error.localizedDescription)
+                }
+            }
+        )
+    }
+
+    private func grokKeyChanged(to key: String) {
+        recorderManager.transcriptionManager.xaiAPIKey = key
+        grokCheck = .idle
+        verifyGrokKey(key, trigger: .automatic)
+    }
+
+    private func testGrok() {
+        verifyGrokKey(
+            recorderManager.transcriptionManager.xaiAPIKey,
+            trigger: .immediate
+        )
+    }
+
+    private func verifyGrokKey(
+        _ key: String,
+        trigger: APIKeyAutoVerifier.Trigger
+    ) {
+        grokKeyVerifier.submit(
+            key: key,
+            trigger: trigger,
+            currentKey: { recorderManager.transcriptionManager.xaiAPIKey },
+            onRunning: { grokCheck = .running },
+            validate: { try await GrokService(apiKey: $0).validateAccess() },
+            onCompletion: { normalizedKey, result in
+                switch result {
+                case .success:
+                    recorderManager.transcriptionManager.xaiAPIKey = normalizedKey
+                    UserDefaults.standard.set(true, forKey: MeetingMemoryProvider.grokVerifiedDefaultsKey)
+                    grokCheck = .success("Key verified with Grok")
+                case .failure(let error):
+                    if GrokService.isCredentialOrModelAccessFailure(error) {
+                        UserDefaults.standard.set(false, forKey: MeetingMemoryProvider.grokVerifiedDefaultsKey)
+                    }
+                    grokCheck = .failure(error.localizedDescription)
                 }
             }
         )

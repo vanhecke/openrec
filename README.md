@@ -39,7 +39,7 @@ The app is signed and notarized by Apple.
 
 OpenRec opens a focused onboarding flow before showing the recorder. It walks through:
 
-- Your AssemblyAI key for transcription and OpenAI key for meeting memory, both stored in the macOS Keychain
+- Your AssemblyAI key for transcription and either an OpenAI or Grok key for meeting memory, both stored in the macOS Keychain
 - OpenRec Cloud with Google sign-in, or your own Cloudflare R2 bucket
 - Default recording and transcript retention
 - An optional external webhook

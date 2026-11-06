@@ -2,6 +2,12 @@ import Foundation
 
 struct OpenAIService {
     let apiKey: String
+    let session: URLSession
+
+    init(apiKey: String, session: URLSession = .shared) {
+        self.apiKey = apiKey
+        self.session = session
+    }
 
     static func isCredentialOrModelAccessFailure(_ error: Error) -> Bool {
         guard case .requestFailed(let status, _) = error as? OpenRecError else {
@@ -20,7 +26,7 @@ struct OpenAIService {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 20
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
     }
 
@@ -86,7 +92,7 @@ struct OpenAIService {
             ],
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
