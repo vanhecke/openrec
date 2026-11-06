@@ -512,12 +512,12 @@ enum MeetingMemoryProvider: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Fast model used for summaries, decisions, and next steps.
-    /// grok-4.3 is the current fast Grok model and the analog of gpt-5-mini.
+    /// Text model for summaries, decisions, next steps, participants, and notes.
+    /// Grok uses grok-4.7. OpenAI stays on gpt-5-mini.
     var modelID: String {
         switch self {
         case .openai: return "gpt-5-mini"
-        case .grok: return "grok-4.3"
+        case .grok: return "grok-4.7"
         }
     }
 

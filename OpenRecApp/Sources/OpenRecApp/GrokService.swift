@@ -1,8 +1,8 @@
 import Foundation
 
 /// Meeting-memory client for the xAI API (`https://api.x.ai/v1`).
-/// grok-4.3 is the fast Grok model: structured outputs, configurable reasoning,
-/// and the current analog of gpt-5-mini. Key checks call xAI only.
+/// grok-4.7 writes structured meeting memory. Insights requests set
+/// reasoning_effort to high. Key checks call xAI only.
 struct GrokService {
     static let speechToTextModelID = TranscriptionProvider.grok.modelLabel
 
@@ -63,7 +63,7 @@ struct GrokService {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        // grok-4.3 can reason before the structured notes, and long calls
+        // grok-4.7 can reason before the structured notes, and long calls
         // produce a large response. Match the OpenAI insights timeout.
         request.timeoutInterval = 300
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
@@ -98,8 +98,9 @@ struct GrokService {
         ]
         let body: [String: Any] = [
             "model": MeetingMemoryProvider.grok.modelID,
-            // Low effort keeps this on the fast path, analogous to gpt-5-mini.
-            "reasoning_effort": "low",
+            // grok-4.7 defaults to high. Send it explicitly so the default
+            // never decides the insights result.
+            "reasoning_effort": "high",
             "messages": [system, user],
             "response_format": responseFormat,
         ]
