@@ -875,6 +875,16 @@ final class RecorderManager: ObservableObject {
                 failure: transcriptionFailure
             )
             meeting.transcript = pendingPreferences.storeTranscriptInCloud ? transcript : nil
+            let callTitle = detectedCall?.title ?? pendingManualTitle
+            let identified = await identifiedSpeakerNames(
+                transcript: transcript,
+                callTitle: callTitle,
+                existing: nil,
+                refresh: true
+            )
+            if let names = identified.names { meeting.speakerNames = names }
+            if let warning = identified.warning { warnings.append(warning) }
+            transcriptionManager.speakerNames = meeting.speakerNames ?? [:]
 
             savePhase = .analyzing
             meeting.saveStage = .analyzing
@@ -882,7 +892,10 @@ final class RecorderManager: ObservableObject {
             try cloudStorage.upsertLocalMeeting(meeting)
             let insights: MeetingInsights
             do {
-                let generated = try await transcriptionManager.analyze(callTitle: detectedCall?.title ?? pendingManualTitle)
+                let generated = try await transcriptionManager.analyze(
+                    callTitle: callTitle,
+                    speakerNames: meeting.speakerNames ?? [:]
+                )
                 let verified = detectedCall?.participants ?? meeting.insights.participants
                 let participants = (verified + generated.participants).reduce(into: [String]()) { result, participant in
                     if !result.contains(where: { $0.caseInsensitiveCompare(participant) == .orderedSame }) {
@@ -1163,6 +1176,15 @@ final class RecorderManager: ObservableObject {
                 failure: transcriptionFailure
             )
             meeting.transcript = meeting.preferences.storeTranscriptInCloud ? transcript : nil
+            let identified = await identifiedSpeakerNames(
+                transcript: transcript,
+                callTitle: meeting.callTitle,
+                existing: meeting.speakerNames,
+                refresh: !newlyTranscribed.isEmpty
+            )
+            if let names = identified.names { meeting.speakerNames = names }
+            if let warning = identified.warning { warnings.append(warning) }
+            transcriptionManager.speakerNames = meeting.speakerNames ?? [:]
 
             meeting.saveStage = .analyzing
             meeting.updatedAt = Date()
@@ -1173,7 +1195,8 @@ final class RecorderManager: ObservableObject {
                 do {
                     let generated = try await analyzeRecoveredTranscript(
                         transcript,
-                        callTitle: meeting.callTitle
+                        callTitle: meeting.callTitle,
+                        speakerNames: meeting.speakerNames ?? [:]
                     )
                     let participants = (meeting.insights.participants + generated.participants)
                         .reduce(into: [String]()) { result, participant in
@@ -1384,16 +1407,43 @@ final class RecorderManager: ObservableObject {
         onProcessingComplete?()
     }
 
+    /// Identifies speakers before meeting memory. A stored map is kept when this
+    /// pass did not just transcribe, so a name the user corrected is not replaced.
+    /// Identification failure does not block the notes that follow.
+    private func identifiedSpeakerNames(
+        transcript: String,
+        callTitle: String?,
+        existing: [String: String]?,
+        refresh: Bool
+    ) async -> (names: [String: String]?, warning: String?) {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return (existing, nil) }
+        if !refresh, let existing { return (existing, nil) }
+        guard !SpeakerNames.speakerLabels(in: trimmed).isEmpty else { return (existing ?? [:], nil) }
+        guard transcriptionManager.meetingMemoryCredentials.hasSelectedKey else { return (existing, nil) }
+        do {
+            let names = try await transcriptionManager.identifySpeakerNames(
+                transcript: trimmed,
+                callTitle: callTitle
+            )
+            return (names, nil)
+        } catch {
+            return (existing, "Speaker names could not be identified: \(error.localizedDescription)")
+        }
+    }
+
     private func analyzeRecoveredTranscript(
         _ transcript: String,
-        callTitle: String?
+        callTitle: String?,
+        speakerNames: [String: String]
     ) async throws -> MeetingInsights {
         transcriptionManager.isAnalyzing = true
         defer { transcriptionManager.isAnalyzing = false }
         do {
             let generated = try await transcriptionManager.generateInsights(
                 transcript: transcript,
-                callTitle: callTitle
+                callTitle: callTitle,
+                speakerNames: speakerNames
             )
             transcriptionManager.insights = generated
             return generated
@@ -1512,6 +1562,15 @@ final class RecorderManager: ObservableObject {
             } else {
                 meeting.transcript = nil
             }
+            let callTitle = detectedCall?.title ?? pendingManualTitle
+            let identified = await identifiedSpeakerNames(
+                transcript: transcript,
+                callTitle: callTitle,
+                existing: meeting.speakerNames,
+                refresh: true
+            )
+            if let names = identified.names { meeting.speakerNames = names }
+            transcriptionManager.speakerNames = meeting.speakerNames ?? [:]
 
             savePhase = .analyzing
             meeting.saveStage = .analyzing
@@ -1519,7 +1578,10 @@ final class RecorderManager: ObservableObject {
             try cloudStorage.upsertLocalMeeting(meeting)
             let insights: MeetingInsights
             do {
-                let generated = try await transcriptionManager.analyze(callTitle: detectedCall?.title ?? pendingManualTitle)
+                let generated = try await transcriptionManager.analyze(
+                    callTitle: callTitle,
+                    speakerNames: meeting.speakerNames ?? [:]
+                )
                 let verified = detectedCall?.participants ?? []
                 let participants = (verified + generated.participants).reduce(into: [String]()) { result, participant in
                     if !result.contains(where: { $0.caseInsensitiveCompare(participant) == .orderedSame }) {
@@ -1617,12 +1679,13 @@ final class RecorderManager: ObservableObject {
             try cloudStorage.upsertLocalMeeting(meeting)
 
             isProcessing = false
-            if let webhookWarning {
-                savePhase = .completeWithWarning(webhookWarning)
-                lastErrorMessage = webhookWarning
-            } else {
+            let saveWarning = [identified.warning, webhookWarning].compactMap { $0 }.joined(separator: " ")
+            if saveWarning.isEmpty {
                 savePhase = .complete
                 lastErrorMessage = nil
+            } else {
+                savePhase = .completeWithWarning(saveWarning)
+                lastErrorMessage = saveWarning
             }
             lastSavedMeetingID = meetingID
             pendingMeetingID = nil

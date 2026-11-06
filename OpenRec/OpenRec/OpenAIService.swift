@@ -31,19 +31,25 @@ struct OpenAIService {
     }
 
     func generateInsights(transcript: String, callTitle: String?) async throws -> MeetingInsights {
-        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
-            throw OpenRecError.invalidConfiguration("Invalid OpenAI endpoint.")
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        // gpt-5-mini reasons before answering and long calls produce large
-        // structured notes; a full response can take several minutes.
-        request.timeoutInterval = 300
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let request = try makeInsightsRequest(transcript: transcript, callTitle: callTitle)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
 
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              let content = message["content"] as? String,
+              let contentData = content.data(using: .utf8) else {
+            throw OpenRecError.invalidResponse("OpenAI returned an unreadable insights response.")
+        }
+        return try JSONDecoder().decode(MeetingInsights.self, from: contentData)
+    }
+
+    func makeInsightsRequest(transcript: String, callTitle: String?) throws -> URLRequest {
         let prompt = """
         Turn this meeting transcript into concise, factual meeting memory. Infer participant names only when the transcript explicitly supports them. Never invent names, owners, dates, or decisions. Return JSON matching the provided schema. Suggested title from the call window: \(callTitle ?? "none").
+
+        Lines begin with a bracketed speaker label. When that label is a person's name, use it for participants, decisions, and next-step owners.
 
         For "aiNotes", write markdown notes the way a sharp human note-taker would capture the call as it happened: short "## " section headers that follow the conversation's actual topics, tight "- " bullet fragments underneath (not full prose sentences), with concrete specifics preserved — names, numbers, prices, tools, dates, and memorable quotes worth keeping. Bold the load-bearing terms. Keep it scannable; no filler, no meta commentary about the transcript.
 
@@ -53,7 +59,7 @@ struct OpenAIService {
         \(transcript)
         """
         let body: [String: Any] = [
-            "model": "gpt-5-mini",
+            "model": MeetingMemoryProvider.openai.modelID,
             "messages": [
                 ["role": "system", "content": "You take meeting notes like an excellent human note-taker, and extract participants, decisions, and concrete next steps."],
                 ["role": "user", "content": prompt],
@@ -91,18 +97,50 @@ struct OpenAIService {
                 ],
             ],
         ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try chatRequest(body: body)
+    }
+
+    func makeSpeakerNamesRequest(transcript: String, callTitle: String?) throws -> URLRequest {
+        let body = SpeakerNames.requestBody(
+            model: MeetingMemoryProvider.openai.modelID,
+            reasoningEffort: nil,
+            transcript: transcript,
+            callTitle: callTitle
+        )
+        return try chatRequest(body: body)
+    }
+
+    func identifySpeakerNames(transcript: String, callTitle: String?) async throws -> [String: String] {
+        let labels = SpeakerNames.speakerLabels(in: transcript)
+        guard !labels.isEmpty else { return [:] }
+        let request = try makeSpeakerNamesRequest(transcript: transcript, callTitle: callTitle)
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
+        return try SpeakerNames.mapping(
+            fromCompletion: data,
+            labels: labels,
+            transcript: transcript,
+            callTitle: callTitle
+        )
+    }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let message = choices.first?["message"] as? [String: Any],
-              let content = message["content"] as? String,
-              let contentData = content.data(using: .utf8) else {
-            throw OpenRecError.invalidResponse("OpenAI returned an unreadable insights response.")
+    private func chatRequest(body: [String: Any]) throws -> URLRequest {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            throw OpenRecError.invalidConfiguration("Enter an OpenAI API key first.")
         }
-        return try JSONDecoder().decode(MeetingInsights.self, from: contentData)
+        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+            throw OpenRecError.invalidConfiguration("Invalid OpenAI endpoint.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        // gpt-5-mini reasons before answering and long calls produce large
+        // structured notes; a full response can take several minutes.
+        request.timeoutInterval = 300
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
     }
 
     private func validate(response: URLResponse, data: Data) throws {

@@ -482,7 +482,10 @@ private struct MeetingMemoryView: View {
 
                         ForEach(recorderManager.transcriptionManager.committedSegments) { segment in
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(segment.speakerLabel)
+                                Text(SpeakerNames.displayName(
+                                    for: segment.speakerLabel,
+                                    mapping: recorderManager.transcriptionManager.speakerNames
+                                ))
                                     .font(.system(size: 10, weight: .semibold))
                                     .foregroundColor(segment.speakerLabel == "Me" ? .blue : .green)
                                 Text(segment.text)
@@ -526,7 +529,7 @@ private struct MeetingMemoryView: View {
             sections.append("Next steps\n" + insights.actionItems.map { "• " + ($0.owner.isEmpty ? $0.task : "\($0.owner): \($0.task)") }.joined(separator: "\n"))
         }
         if !insights.decisions.isEmpty { sections.append("Decisions\n" + insights.decisions.map { "• \($0)" }.joined(separator: "\n")) }
-        let transcript = recorderManager.transcriptionManager.fullTranscriptText()
+        let transcript = recorderManager.transcriptionManager.namedTranscriptText()
         if !transcript.isEmpty { sections.append("Transcript\n\(transcript)") }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(sections.joined(separator: "\n\n"), forType: .string)

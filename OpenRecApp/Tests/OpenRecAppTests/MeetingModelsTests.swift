@@ -316,7 +316,8 @@ final class MeetingModelsTests: XCTestCase {
 
     func testManagedSignOutStubScrubsPrivateMeetingMemoryButKeepsRecoveryLink() {
         let path = temporaryDirectory.appendingPathComponent("managed-recovery.mp4").path
-        let managed = makeRecord(localScreenPath: path, saveStatus: .failed)
+        var managed = makeRecord(localScreenPath: path, saveStatus: .failed)
+        managed.speakerNames = ["Speaker A": "Maya"]
 
         let stub = ManagedSignOutPrivacy.scrubbedArtifactStub(from: managed) { $0 == path }
 
@@ -324,6 +325,7 @@ final class MeetingModelsTests: XCTestCase {
         XCTAssertNil(stub?.callApp)
         XCTAssertNil(stub?.callTitle)
         XCTAssertNil(stub?.transcript)
+        XCTAssertNil(stub?.speakerNames)
         XCTAssertTrue(stub?.insights.participants.isEmpty == true)
         XCTAssertTrue(stub?.insights.summary.isEmpty == true)
         XCTAssertEqual(stub?.localScreenPath, path)
