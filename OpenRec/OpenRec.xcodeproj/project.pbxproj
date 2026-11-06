@@ -12,6 +12,7 @@
 		A1000002243B0001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000012243B0001 /* AppDelegate.swift */; };
 		A1000003243B0001 /* RecorderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000013243B0001 /* RecorderManager.swift */; };
 		A1000004243B0001 /* ScreenRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000014243B0001 /* ScreenRecorder.swift */; };
+		A10000D0243B0004 /* ScreenEncodeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000D1243B0004 /* ScreenEncodeSettings.swift */; };
 		A1000005243B0001 /* FloatingPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000015243B0001 /* FloatingPanelView.swift */; };
 		A1000006243B0001 /* PopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000016243B0001 /* PopoverView.swift */; };
 		A1000007243B0001 /* UpdateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000017243B0001 /* UpdateManager.swift */; };
@@ -51,6 +52,7 @@
 		A1000012243B0001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A1000013243B0001 /* RecorderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecorderManager.swift; sourceTree = "<group>"; };
 		A1000014243B0001 /* ScreenRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRecorder.swift; sourceTree = "<group>"; };
+		A10000D1243B0004 /* ScreenEncodeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenEncodeSettings.swift; sourceTree = "<group>"; };
 		A1000015243B0001 /* FloatingPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelView.swift; sourceTree = "<group>"; };
 		A1000016243B0001 /* PopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverView.swift; sourceTree = "<group>"; };
 		A1000017243B0001 /* UpdateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateManager.swift; sourceTree = "<group>"; };
@@ -118,6 +120,7 @@
 				A1000012243B0001 /* AppDelegate.swift */,
 				A1000013243B0001 /* RecorderManager.swift */,
 				A1000014243B0001 /* ScreenRecorder.swift */,
+				A10000D1243B0004 /* ScreenEncodeSettings.swift */,
 				A1000015243B0001 /* FloatingPanelView.swift */,
 				A1000016243B0001 /* PopoverView.swift */,
 				A1000017243B0001 /* UpdateManager.swift */,
@@ -246,6 +249,7 @@
 				A1000002243B0001 /* AppDelegate.swift in Sources */,
 				A1000003243B0001 /* RecorderManager.swift in Sources */,
 				A1000004243B0001 /* ScreenRecorder.swift in Sources */,
+				A10000D0243B0004 /* ScreenEncodeSettings.swift in Sources */,
 				A1000005243B0001 /* FloatingPanelView.swift in Sources */,
 				A1000006243B0001 /* PopoverView.swift in Sources */,
 				A1000007243B0001 /* UpdateManager.swift in Sources */,

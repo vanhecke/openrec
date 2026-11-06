@@ -68,6 +68,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     /// Whether to produce a separate audio-only CMAF stream. The screen stream
     /// always contains mixed call audio, regardless of this value.
     private let recordsAudio: Bool
+    private let encodeSettings: ScreenEncodeSettings
     private let segmentDuration: CMTime
 
     private var stream: SCStream?
@@ -112,11 +113,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         micDevice: AVCaptureDevice?,
         recordsScreen: Bool,
         recordsAudio: Bool,
-        segmentDuration: TimeInterval = 8
+        segmentDuration: TimeInterval = 8,
+        encodeSettings: ScreenEncodeSettings = ScreenEncodeSettings()
     ) {
         self.micDevice = micDevice
         self.recordsScreen = recordsScreen
         self.recordsAudio = recordsAudio
+        self.encodeSettings = encodeSettings
         self.segmentDuration = CMTime(
             seconds: max(2, segmentDuration),
             preferredTimescale: 600
@@ -158,7 +161,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         let configuration = SCStreamConfiguration()
         configuration.width = width
         configuration.height = height
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        configuration.minimumFrameInterval = encodeSettings.minimumFrameInterval
         configuration.queueDepth = 5
         configuration.showsCursor = true
         configuration.capturesAudio = true
@@ -272,7 +275,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
                 kind: .muxedScreen(width: width, height: height),
                 segmentDuration: segmentDuration,
                 mixedPCMFormatDescription: mixedPCMFormatDescription,
-                delegate: self
+                delegate: self,
+                encodeSettings: encodeSettings
             )
             screenWriter = components.writer
             screenVideoInput = components.videoInput
@@ -296,7 +300,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         kind: SegmentedWriterKind,
         segmentDuration: CMTime,
         mixedPCMFormatDescription: CMAudioFormatDescription,
-        delegate: AVAssetWriterDelegate
+        delegate: AVAssetWriterDelegate,
+        encodeSettings: ScreenEncodeSettings = ScreenEncodeSettings()
     ) throws -> SegmentedWriterComponents {
         let profile: AVFileTypeProfile
         switch kind {
@@ -314,16 +319,11 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         var pixelBufferAdaptorCreationStatus: AVAssetWriter.Status?
 
         if case .muxedScreen(let width, let height) = kind {
-            let videoSettings: [String: Any] = [
-                AVVideoCodecKey: AVVideoCodecType.h264,
-                AVVideoWidthKey: width,
-                AVVideoHeightKey: height,
-                AVVideoCompressionPropertiesKey: [
-                    AVVideoAverageBitRateKey: 3_000_000,
-                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-                    AVVideoMaxKeyFrameIntervalDurationKey: CMTimeGetSeconds(segmentDuration)
-                ]
-            ]
+            let videoSettings = encodeSettings.videoOutputSettings(
+                width: width,
+                height: height,
+                segmentDuration: segmentDuration
+            )
             guard writer.canApply(outputSettings: videoSettings, forMediaType: .video) else {
                 throw RecorderError.setupFailed("This Mac cannot encode the selected display as H.264.")
             }

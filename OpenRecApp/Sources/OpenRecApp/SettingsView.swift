@@ -651,6 +651,35 @@ struct OpenRecSettingsView: View {
                 }
             }
 
+            SettingsCard(title: "Screen recording") {
+                VStack(alignment: .leading, spacing: 8) {
+                    ScreenEncodeMenu(
+                        accessibilityLabel: "Frame rate",
+                        title: "Frame rate",
+                        detail: recorderManager.screenEncodeSettings.frameRatePresentation().detail,
+                        value: recorderManager.screenEncodeSettings.frameRatePresentation().title,
+                        choices: ScreenEncodeSettings.frameRateChoices,
+                        selected: recorderManager.screenEncodeSettings.frameRate
+                    ) { frameRate in
+                        updateScreenEncodeSettings { $0.frameRate = frameRate }
+                    }
+                    ScreenEncodeMenu(
+                        accessibilityLabel: "Recording quality",
+                        title: "Quality",
+                        detail: recorderManager.screenEncodeSettings.qualityPresentation().detail,
+                        value: recorderManager.screenEncodeSettings.qualityPresentation().title,
+                        choices: ScreenEncodeSettings.qualityChoices,
+                        selected: recorderManager.screenEncodeSettings.averageBitRate
+                    ) { averageBitRate in
+                        updateScreenEncodeSettings { $0.averageBitRate = averageBitRate }
+                    }
+                    Text("H.264, so call audio stays in the screen recording. Frame rate and quality apply the next time a recording starts.")
+                        .font(.system(size: 10))
+                        .foregroundColor(Color.white.opacity(0.44))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             SettingsCard(title: "Capture") {
                 VStack(spacing: 0) {
                     SettingsToggleRow(
@@ -770,6 +799,12 @@ struct OpenRecSettingsView: View {
 
     private var grokKeyLivesOnMemoryCard: Bool {
         !grokKeyLivesOnTranscriptionCard
+    }
+
+    private func updateScreenEncodeSettings(_ change: (inout ScreenEncodeSettings) -> Void) {
+        var settings = recorderManager.screenEncodeSettings
+        change(&settings)
+        recorderManager.screenEncodeSettings = settings
     }
 
     private func preference(_ path: WritableKeyPath<CallPreferences, Bool>) -> Binding<Bool> {
@@ -1024,6 +1059,71 @@ private struct SettingsToggleRow: View {
 
 private struct SettingsDivider: View {
     var body: some View { Color.white.opacity(0.06).frame(height: 1) }
+}
+
+private struct ScreenEncodeRowLabel: View {
+    let title: String
+    let detail: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 11) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 11.5, weight: .semibold))
+                Text(detail)
+                    .font(.system(size: 10))
+                    .foregroundColor(Color.white.opacity(0.43))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(Color.white.opacity(0.35))
+        }
+        .foregroundColor(Color.white.opacity(0.86))
+        .padding(.horizontal, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 50)
+        .background(Color.white.opacity(0.025))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct ScreenEncodeMenu: View {
+    let accessibilityLabel: String
+    let title: String
+    let detail: String
+    let value: String
+    let choices: [ScreenEncodeSettings.Choice]
+    let selected: Int
+    let onSelect: (Int) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(choices) { choice in
+                Button {
+                    onSelect(choice.value)
+                } label: {
+                    if choice.value == selected {
+                        Label("\(choice.title) · \(choice.detail)", systemImage: "checkmark")
+                    } else {
+                        Text("\(choice.title) · \(choice.detail)")
+                    }
+                }
+            }
+        } label: {
+            ScreenEncodeRowLabel(title: title, detail: detail, value: value)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel(accessibilityLabel)
+    }
 }
 
 private struct GrokKeyTermRow: Identifiable {

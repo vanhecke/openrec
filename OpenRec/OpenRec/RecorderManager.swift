@@ -151,6 +151,9 @@ final class RecorderManager: ObservableObject {
     @Published var callPreferences: CallPreferences {
         didSet { savePreferences() }
     }
+    @Published var screenEncodeSettings: ScreenEncodeSettings {
+        didSet { screenEncodeSettings.store(in: .standard) }
+    }
     @Published private(set) var activeCallPreferences: CallPreferences?
     @Published var detectedCall: DetectedCall?
     @Published var lastSavedMeetingID: UUID?
@@ -222,6 +225,7 @@ final class RecorderManager: ObservableObject {
         showRecordingBorder = UserDefaults.standard.object(forKey: showBorderKey) as? Bool ?? true
         callDetectionEnabled = UserDefaults.standard.object(forKey: "CallDetectionEnabled") as? Bool ?? true
         callPreferences = Self.loadPreferences()
+        screenEncodeSettings = ScreenEncodeSettings.stored(in: .standard)
         if let last = lastClientNameDisplay { clientNameInput = last }
         refreshMicrophones()
 
@@ -472,7 +476,12 @@ final class RecorderManager: ObservableObject {
                 return
             }
 
-            let recorder = ScreenRecorder(micDevice: mic, recordsScreen: true, recordsAudio: true)
+            let recorder = ScreenRecorder(
+                micDevice: mic,
+                recordsScreen: true,
+                recordsAudio: true,
+                encodeSettings: screenEncodeSettings
+            )
             self.recorder = recorder
             recorder.onAudioLevels = { [weak self] mic, system in
                 Task { @MainActor in self?.micLevel = mic; self?.systemLevel = system }
