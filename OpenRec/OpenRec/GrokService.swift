@@ -53,30 +53,26 @@ struct GrokService {
         return request
     }
 
-    func makeInsightsRequest(transcript: String, callTitle: String?) throws -> URLRequest {
+    func makeInsightsRequest(
+        transcript: String,
+        callTitle: String?,
+        defaults: UserDefaults = .standard
+    ) throws -> URLRequest {
         // grok-4.7 can reason before the structured notes, and long calls
         // produce a large response. Match the OpenAI insights timeout.
         var request = try chatRequest()
 
-        let prompt = """
-        Turn this meeting transcript into concise, factual meeting memory. Infer participant names only when the transcript explicitly supports them. Never invent names, owners, dates, or decisions. Return JSON matching the provided schema. Suggested title from the call window: \(callTitle ?? "none").
-
-        Lines begin with a bracketed speaker label. When that label is a person's name, use it for participants, decisions, and next-step owners.
-
-        For "aiNotes", write markdown notes the way a sharp human note-taker would capture the call as it happened: short "## " section headers that follow the conversation's actual topics, tight "- " bullet fragments underneath (not full prose sentences), with concrete specifics preserved — names, numbers, prices, tools, dates, and memorable quotes worth keeping. Bold the load-bearing terms. Keep it scannable; no filler, no meta commentary about the transcript.
-
-        For "summary", write 2-3 plain sentences of what the call was about and where it landed.
-
-        Transcript:
-        \(transcript)
-        """
         let system: [String: Any] = [
             "role": "system",
-            "content": "You take meeting notes like an excellent human note-taker, and extract participants, decisions, and concrete next steps.",
+            "content": AIPromptStore.meetingMemorySystem(defaults: defaults),
         ]
         let user: [String: Any] = [
             "role": "user",
-            "content": prompt,
+            "content": AIPromptStore.meetingMemoryUser(
+                transcript: transcript,
+                callTitle: callTitle,
+                defaults: defaults
+            ),
         ]
         let jsonSchema: [String: Any] = [
             "name": "meeting_insights",
@@ -99,13 +95,18 @@ struct GrokService {
         return request
     }
 
-    func makeSpeakerNamesRequest(transcript: String, callTitle: String?) throws -> URLRequest {
+    func makeSpeakerNamesRequest(
+        transcript: String,
+        callTitle: String?,
+        defaults: UserDefaults = .standard
+    ) throws -> URLRequest {
         let request = try chatRequest()
         let body = SpeakerNames.requestBody(
             model: MeetingMemoryProvider.grok.modelID,
             reasoningEffort: "high",
             transcript: transcript,
-            callTitle: callTitle
+            callTitle: callTitle,
+            defaults: defaults
         )
         var named = request
         named.httpBody = try JSONSerialization.data(withJSONObject: body)

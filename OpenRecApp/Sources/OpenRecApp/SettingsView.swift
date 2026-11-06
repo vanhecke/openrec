@@ -9,6 +9,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case recording = "Recording"
     case integrations = "Integrations"
     case permissions = "Permissions"
+    case advanced = "Advanced"
 
     var id: String { rawValue }
     var icon: String {
@@ -18,6 +19,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .recording: return "record.circle"
         case .integrations: return "arrow.triangle.branch"
         case .permissions: return "hand.raised.fill"
+        case .advanced: return "slider.horizontal.3"
         }
     }
 }
@@ -51,6 +53,10 @@ struct OpenRecSettingsView: View {
     @StateObject private var grokKeyVerifier = APIKeyAutoVerifier()
     @State private var microphoneGranted = false
     @State private var screenGranted = false
+    @State private var meetingMemorySystemPrompt = AIPromptStore.effective(.meetingMemorySystem)
+    @State private var meetingMemoryUserPrompt = AIPromptStore.effective(.meetingMemoryUser)
+    @State private var speakerSystemPrompt = AIPromptStore.effective(.speakerIdentificationSystem)
+    @State private var speakerUserPrompt = AIPromptStore.effective(.speakerIdentificationUser)
 
     private let background = Color(red: 0.105, green: 0.11, blue: 0.115)
     private let sidebar = Color(red: 0.13, green: 0.135, blue: 0.14)
@@ -175,6 +181,7 @@ struct OpenRecSettingsView: View {
         case .recording: return "Set defaults for new calls. During-call changes apply only to that call."
         case .integrations: return "Deliver completed meeting metadata and recordings to your systems."
         case .permissions: return "OpenRec only captures your screen and microphone while recording."
+        case .advanced: return "Edit the prompts OpenAI and Grok share for meeting notes and speaker names. Response schemas stay fixed."
         }
     }
 
@@ -186,6 +193,7 @@ struct OpenRecSettingsView: View {
         case .recording: recordingSection
         case .integrations: integrationsSection
         case .permissions: permissionsSection
+        case .advanced: advancedSection
         }
     }
 
@@ -789,6 +797,105 @@ struct OpenRecSettingsView: View {
         }
     }
 
+    private var advancedSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SettingsCard(title: "Shared prompts") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("OpenAI and Grok use this same text. Clear a prompt, or restore it, to send the built-in default on the next request. Transcription is unchanged.")
+                        .font(.system(size: 10))
+                        .foregroundColor(Color.white.opacity(0.44))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Restore all prompts", action: restoreAllPrompts)
+                        .buttonStyle(SettingsButtonStyle(prominent: false))
+                }
+            }
+            promptCard(
+                title: "Meeting memory system prompt",
+                detail: "System message for meeting notes.",
+                text: $meetingMemorySystemPrompt,
+                height: 72,
+                prompt: .meetingMemorySystem
+            )
+            promptCard(
+                title: "Meeting memory instruction template",
+                detail: "Instructions around the transcript, not a live transcript. Use \(AIPromptStore.Placeholder.callTitle.token) and \(AIPromptStore.Placeholder.transcript.token). If you remove one, that live value is still appended.",
+                text: $meetingMemoryUserPrompt,
+                height: 200,
+                prompt: .meetingMemoryUser
+            )
+            promptCard(
+                title: "Speaker identification system prompt",
+                detail: "System message for attaching names to diarized speaker labels.",
+                text: $speakerSystemPrompt,
+                height: 72,
+                prompt: .speakerIdentificationSystem
+            )
+            promptCard(
+                title: "Speaker identification instruction template",
+                detail: "Instructions around the transcript. Use \(AIPromptStore.Placeholder.speakerLabels.token), \(AIPromptStore.Placeholder.callTitle.token), and \(AIPromptStore.Placeholder.transcript.token). If you remove one, that live value is still appended.",
+                text: $speakerUserPrompt,
+                height: 160,
+                prompt: .speakerIdentificationUser
+            )
+        }
+        .onChange(of: meetingMemorySystemPrompt) { value in
+            AIPromptStore.set(.meetingMemorySystem, text: value)
+        }
+        .onChange(of: meetingMemoryUserPrompt) { value in
+            AIPromptStore.set(.meetingMemoryUser, text: value)
+        }
+        .onChange(of: speakerSystemPrompt) { value in
+            AIPromptStore.set(.speakerIdentificationSystem, text: value)
+        }
+        .onChange(of: speakerUserPrompt) { value in
+            AIPromptStore.set(.speakerIdentificationUser, text: value)
+        }
+    }
+
+    private func promptCard(
+        title: String,
+        detail: String,
+        text: Binding<String>,
+        height: CGFloat,
+        prompt: AIPromptStore.Prompt
+    ) -> some View {
+        SettingsCard(title: title) {
+            VStack(alignment: .leading, spacing: 8) {
+                SettingsPromptTextEditor(
+                    text: text,
+                    accessibilityLabel: title,
+                    onEndEditing: {
+                        if text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            text.wrappedValue = prompt.defaultText
+                        }
+                    }
+                )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: height)
+                    .padding(8)
+                    .background(Color.white.opacity(0.07))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                Text(detail)
+                    .font(.system(size: 10))
+                    .foregroundColor(Color.white.opacity(0.44))
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Restore default") {
+                    AIPromptStore.restore(prompt)
+                    text.wrappedValue = prompt.defaultText
+                }
+                .buttonStyle(SettingsButtonStyle(prominent: false))
+            }
+        }
+    }
+
+    private func restoreAllPrompts() {
+        AIPromptStore.restoreAll()
+        meetingMemorySystemPrompt = AIPromptStore.effective(.meetingMemorySystem)
+        meetingMemoryUserPrompt = AIPromptStore.effective(.meetingMemoryUser)
+        speakerSystemPrompt = AIPromptStore.effective(.speakerIdentificationSystem)
+        speakerUserPrompt = AIPromptStore.effective(.speakerIdentificationUser)
+    }
+
     /// One xAI key field. Transcription owns it when Grok transcribes, and also
     /// when Grok is not the meeting-memory provider. Meeting memory owns it only
     /// when Grok writes notes and AssemblyAI transcribes.
@@ -1000,6 +1107,83 @@ private struct SettingsCard<Content: View>: View {
         .background(Color.white.opacity(0.045))
         .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(Color.white.opacity(0.055)))
+    }
+}
+
+private struct SettingsPromptTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    var accessibilityLabel: String
+    var onEndEditing: () -> Void = {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onEndEditing: onEndEditing)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSTextView.scrollableTextView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.allowsUndo = true
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticDataDetectionEnabled = false
+        textView.isAutomaticLinkDetectionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.font = NSFont.systemFont(ofSize: 11)
+        textView.textColor = NSColor.white.withAlphaComponent(0.86)
+        textView.insertionPointColor = NSColor.white.withAlphaComponent(0.9)
+        textView.typingAttributes = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.86),
+        ]
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.textContainer?.widthTracksTextView = true
+        textView.isHorizontallyResizable = false
+        textView.textContainerInset = NSSize(width: 2, height: 4)
+        textView.string = text
+        textView.delegate = context.coordinator
+        textView.setAccessibilityLabel(accessibilityLabel)
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        context.coordinator.text = $text
+        context.coordinator.onEndEditing = onEndEditing
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        textView.setAccessibilityLabel(accessibilityLabel)
+        guard textView.string != text else { return }
+        textView.string = text
+        let end = (text as NSString).length
+        textView.setSelectedRange(NSRange(location: end, length: 0))
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var text: Binding<String>
+        var onEndEditing: () -> Void
+
+        init(text: Binding<String>, onEndEditing: @escaping () -> Void) {
+            self.text = text
+            self.onEndEditing = onEndEditing
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            if text.wrappedValue != textView.string {
+                text.wrappedValue = textView.string
+            }
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            onEndEditing()
+        }
     }
 }
 

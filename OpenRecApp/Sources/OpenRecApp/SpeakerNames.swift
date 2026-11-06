@@ -123,33 +123,40 @@ enum SpeakerNames {
         return acceptedMapping(from: content, labels: labels, transcript: transcript, callTitle: callTitle)
     }
 
-    static func identificationPrompt(transcript: String, callTitle: String?, labels: [String]) -> String {
-        let title = callTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let titleLine = (title?.isEmpty == false) ? title! : "none"
-        return """
-        Identify the real name of each diarized speaker. The transcript labels speakers as \(labels.joined(separator: ", ")). Use a name only when the transcript explicitly supports it: someone introduces themselves, another speaker addresses them by name, or the meeting title names them. Never invent a name. If a speaker's name is not supported, return null. Return one entry for every label, using the label text exactly.
-
-        Meeting title: \(titleLine)
-
-        Transcript:
-        \(transcript)
-        """
+    static func identificationPrompt(
+        transcript: String,
+        callTitle: String?,
+        labels: [String],
+        defaults: UserDefaults = .standard
+    ) -> String {
+        AIPromptStore.speakerIdentificationUser(
+            transcript: transcript,
+            callTitle: callTitle,
+            labels: labels,
+            defaults: defaults
+        )
     }
 
     static func requestBody(
         model: String,
         reasoningEffort: String?,
         transcript: String,
-        callTitle: String?
+        callTitle: String?,
+        defaults: UserDefaults = .standard
     ) -> [String: Any] {
         let labels = speakerLabels(in: transcript)
         let system: [String: Any] = [
             "role": "system",
-            "content": "You attach real names to diarized speaker labels. You never guess.",
+            "content": AIPromptStore.speakerIdentificationSystem(defaults: defaults),
         ]
         let user: [String: Any] = [
             "role": "user",
-            "content": identificationPrompt(transcript: transcript, callTitle: callTitle, labels: labels),
+            "content": identificationPrompt(
+                transcript: transcript,
+                callTitle: callTitle,
+                labels: labels,
+                defaults: defaults
+            ),
         ]
         let responseFormat: [String: Any] = [
             "type": "json_schema",
