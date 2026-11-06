@@ -420,6 +420,51 @@ enum GrokTranscriptionLanguage: String, CaseIterable, Identifiable {
     }
 }
 
+/// Product names and proper nouns repeated as `keyterm` for grok-voice-transcribe-2.0.
+/// A missing, empty, or unreadable stored value is an empty list, and an empty
+/// list omits `keyterm` from the transcription request.
+/// Stored as a JSON string array so spaces survive. On store and on send,
+/// terms are trimmed, empties dropped, each capped at 50 characters, and
+/// limited to the first 100. Wording and order are preserved.
+enum GrokTranscriptionKeyTerms {
+    static let defaultsKey = "GrokTranscriptionKeyTerms"
+    static let maxCount = 100
+    static let maxCharacters = 50
+
+    static func normalized(_ terms: [String]) -> [String] {
+        var kept: [String] = []
+        kept.reserveCapacity(min(terms.count, maxCount))
+        for term in terms {
+            let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+            kept.append(String(trimmed.prefix(maxCharacters)))
+            if kept.count == maxCount { break }
+        }
+        return kept
+    }
+
+    static func resolved(from stored: String?) -> [String] {
+        guard let stored, let data = stored.data(using: .utf8),
+              let terms = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return normalized(terms)
+    }
+
+    static func stored(in defaults: UserDefaults = .standard) -> [String] {
+        resolved(from: defaults.string(forKey: defaultsKey))
+    }
+
+    static func store(_ terms: [String], in defaults: UserDefaults = .standard) {
+        let normalized = normalized(terms)
+        guard let data = try? JSONEncoder().encode(normalized),
+              let json = String(data: data, encoding: .utf8) else {
+            return
+        }
+        defaults.set(json, forKey: defaultsKey)
+    }
+}
+
 struct TranscriptionCredentials: Equatable {
     var provider: TranscriptionProvider
     var assemblyKey: String

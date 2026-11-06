@@ -215,9 +215,14 @@ struct GrokService {
 
     func transcribe(
         fileURL: URL,
-        language: GrokTranscriptionLanguage = .autoDetect
+        language: GrokTranscriptionLanguage = .autoDetect,
+        keyTerms: [String] = []
     ) async throws -> [DisplaySegment] {
-        let request = try makeTranscriptionRequest(fileURL: fileURL, language: language)
+        let request = try makeTranscriptionRequest(
+            fileURL: fileURL,
+            language: language,
+            keyTerms: keyTerms
+        )
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
         return try decodeTranscript(data)
@@ -227,9 +232,14 @@ struct GrokService {
     /// short-lived HTTPS URL. xAI downloads it server-side.
     func transcribe(
         audioURL: URL,
-        language: GrokTranscriptionLanguage = .autoDetect
+        language: GrokTranscriptionLanguage = .autoDetect,
+        keyTerms: [String] = []
     ) async throws -> [DisplaySegment] {
-        let request = try makeTranscriptionRequest(audioURL: audioURL, language: language)
+        let request = try makeTranscriptionRequest(
+            audioURL: audioURL,
+            language: language,
+            keyTerms: keyTerms
+        )
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
         return try decodeTranscript(data)
@@ -237,7 +247,8 @@ struct GrokService {
 
     func makeTranscriptionRequest(
         fileURL: URL,
-        language: GrokTranscriptionLanguage = .autoDetect
+        language: GrokTranscriptionLanguage = .autoDetect,
+        keyTerms: [String] = []
     ) throws -> URLRequest {
         let key = try trimmedKey()
         guard fileURL.isFileURL, FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -254,7 +265,7 @@ struct GrokService {
         let fileName = Self.safeFileName(fileURL.lastPathComponent)
         let boundary = "OpenRecGrok\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
         let body = Self.multipartBody(
-            fields: Self.transcriptionFields(language: language),
+            fields: Self.transcriptionFields(language: language, keyTerms: keyTerms),
             fileField: "file",
             fileName: fileName,
             mimeType: Self.mimeType(for: fileURL),
@@ -266,7 +277,8 @@ struct GrokService {
 
     func makeTranscriptionRequest(
         audioURL: URL,
-        language: GrokTranscriptionLanguage = .autoDetect
+        language: GrokTranscriptionLanguage = .autoDetect,
+        keyTerms: [String] = []
     ) throws -> URLRequest {
         let key = try trimmedKey()
         guard audioURL.scheme == "https", audioURL.host != nil else {
@@ -274,7 +286,11 @@ struct GrokService {
         }
         let boundary = "OpenRecGrok\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
         let body = Self.multipartBody(
-            fields: Self.transcriptionFields(language: language, url: audioURL.absoluteString),
+            fields: Self.transcriptionFields(
+                language: language,
+                keyTerms: keyTerms,
+                url: audioURL.absoluteString
+            ),
             fileField: nil,
             fileName: nil,
             mimeType: nil,
@@ -287,9 +303,11 @@ struct GrokService {
     /// Auto-Detect omits `language` and `format`. A chosen language sends both.
     /// `format=true` without `language` is HTTP 400. Formatting is a no-op in
     /// languages without coverage, including Thai, and is still sent.
-    /// `file` is appended after these fields so it stays last.
+    /// Each normalized key term is one repeated `keyterm` field. An empty list
+    /// omits `keyterm`. `file` is appended after these fields so it stays last.
     private static func transcriptionFields(
         language: GrokTranscriptionLanguage,
+        keyTerms: [String] = [],
         url: String? = nil
     ) -> [(String, String)] {
         var fields: [(String, String)] = [
@@ -302,6 +320,9 @@ struct GrokService {
         }
         if let url {
             fields.append(("url", url))
+        }
+        for term in GrokTranscriptionKeyTerms.normalized(keyTerms) {
+            fields.append(("keyterm", term))
         }
         return fields
     }

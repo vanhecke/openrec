@@ -445,6 +445,267 @@ final class GrokServiceTests: XCTestCase {
         assertField("url", equals: restoredURL.absoluteString, in: restored)
     }
 
+    func testEmptyKeyTermsOmitTheField() throws {
+        let audioURL = try temporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL.deletingLastPathComponent()) }
+
+        let explicit = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                fileURL: audioURL,
+                keyTerms: []
+            )
+        )
+        assertField("model", equals: "grok-voice-transcribe-2.0", in: explicit)
+        assertField("diarize", equals: "true", in: explicit)
+        assertAbsent("keyterm", in: explicit)
+        assertAbsent("language", in: explicit)
+        assertAbsent("format", in: explicit)
+        assertAbsent("filler_words", in: explicit)
+        assertAbsent("vad_threshold", in: explicit)
+        assertFieldOrder(["model", "diarize", "file"], in: explicit)
+        assertLastMultipartField(named: "file", in: explicit)
+
+        let defaulted = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(fileURL: audioURL)
+        )
+        assertAbsent("keyterm", in: defaulted)
+        assertLastMultipartField(named: "file", in: defaulted)
+    }
+
+    func testSingleKeyTermIsSentAndFileStaysLast() throws {
+        let audioURL = try temporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL.deletingLastPathComponent()) }
+
+        let body = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                fileURL: audioURL,
+                keyTerms: ["Understand The Universe"]
+            )
+        )
+
+        XCTAssertEqual(multipartFieldValues(named: "keyterm", in: body), ["Understand The Universe"])
+        assertField("keyterm", equals: "Understand The Universe", in: body)
+        assertField("model", equals: "grok-voice-transcribe-2.0", in: body)
+        assertField("diarize", equals: "true", in: body)
+        assertAbsent("language", in: body)
+        assertAbsent("format", in: body)
+        assertFieldOrder(["model", "diarize", "keyterm", "file"], in: body)
+        assertLastMultipartField(named: "file", in: body)
+    }
+
+    func testRepeatedKeyTermsPreserveSpaces() throws {
+        let audioURL = try temporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL.deletingLastPathComponent()) }
+        let terms = ["Understand The Universe", "OpenRec", "Q&A Bot"]
+
+        let body = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                fileURL: audioURL,
+                keyTerms: terms
+            )
+        )
+
+        XCTAssertEqual(multipartFieldValues(named: "keyterm", in: body), terms)
+        assertField("diarize", equals: "true", in: body)
+        assertAbsent("filler_words", in: body)
+        assertAbsent("vad_threshold", in: body)
+        assertFieldOrder(["model", "diarize", "keyterm", "file"], in: body)
+        assertLastMultipartField(named: "file", in: body)
+    }
+
+    func testURLTranscriptionSendsKeyTerms() throws {
+        let audioURL = try XCTUnwrap(URL(string: "https://example.com/calls/audio.m4a?sig=1"))
+        let terms = ["Understand The Universe", "OpenRec"]
+        let body = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                audioURL: audioURL,
+                keyTerms: terms
+            )
+        )
+
+        XCTAssertEqual(multipartFieldValues(named: "keyterm", in: body), terms)
+        assertField("url", equals: audioURL.absoluteString, in: body)
+        assertField("model", equals: "grok-voice-transcribe-2.0", in: body)
+        assertField("diarize", equals: "true", in: body)
+        assertAbsent("language", in: body)
+        assertAbsent("format", in: body)
+        assertAbsent("file", in: body)
+        assertFieldOrder(["model", "diarize", "url", "keyterm"], in: body)
+        assertLastMultipartField(named: "keyterm", in: body)
+    }
+
+    func testAutoDetectWithKeyTermsOmitsLanguageAndFormat() throws {
+        let audioURL = try temporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL.deletingLastPathComponent()) }
+
+        let body = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                fileURL: audioURL,
+                language: .autoDetect,
+                keyTerms: ["Understand The Universe"]
+            )
+        )
+
+        XCTAssertEqual(multipartFieldValues(named: "keyterm", in: body), ["Understand The Universe"])
+        assertAbsent("language", in: body)
+        assertAbsent("format", in: body)
+        assertField("diarize", equals: "true", in: body)
+        assertFieldOrder(["model", "diarize", "keyterm", "file"], in: body)
+        assertLastMultipartField(named: "file", in: body)
+    }
+
+    func testEnglishWithKeyTermsSendsLanguageAndFormat() throws {
+        let audioURL = try temporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL.deletingLastPathComponent()) }
+        let terms = ["Understand The Universe", "OpenRec"]
+
+        let body = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                fileURL: audioURL,
+                language: .english,
+                keyTerms: terms
+            )
+        )
+
+        XCTAssertEqual(multipartFieldValues(named: "keyterm", in: body), terms)
+        assertField("language", equals: "en", in: body)
+        assertField("format", equals: "true", in: body)
+        assertField("model", equals: "grok-voice-transcribe-2.0", in: body)
+        assertField("diarize", equals: "true", in: body)
+        assertFieldOrder(["model", "diarize", "language", "format", "keyterm", "file"], in: body)
+        assertLastMultipartField(named: "file", in: body)
+
+        let remoteURL = try XCTUnwrap(URL(string: "https://example.com/calls/audio.m4a"))
+        let remote = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                audioURL: remoteURL,
+                language: .english,
+                keyTerms: terms
+            )
+        )
+        XCTAssertEqual(multipartFieldValues(named: "keyterm", in: remote), terms)
+        assertField("language", equals: "en", in: remote)
+        assertField("format", equals: "true", in: remote)
+        assertField("url", equals: remoteURL.absoluteString, in: remote)
+        assertAbsent("file", in: remote)
+        assertFieldOrder(["model", "diarize", "language", "format", "url", "keyterm"], in: remote)
+        assertLastMultipartField(named: "keyterm", in: remote)
+    }
+
+    func testOverlongKeyTermsAreCappedWhenSent() throws {
+        let audioURL = try temporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL.deletingLastPathComponent()) }
+
+        let long = String(repeating: "é", count: 51)
+        var terms = ["  Understand The Universe  ", "", "   ", long, "Open  Rec"]
+        terms.append(contentsOf: (1...100).map { "Extra \($0)" })
+
+        let body = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                fileURL: audioURL,
+                language: .autoDetect,
+                keyTerms: terms
+            )
+        )
+
+        let values = multipartFieldValues(named: "keyterm", in: body)
+        XCTAssertEqual(values.count, 100)
+        XCTAssertEqual(values[0], "Understand The Universe")
+        XCTAssertEqual(values[1], String(repeating: "é", count: 50))
+        XCTAssertEqual(values[2], "Open  Rec")
+        XCTAssertEqual(values[3], "Extra 1")
+        XCTAssertEqual(values.last, "Extra 97")
+        XCTAssertFalse(values.contains("Extra 98"))
+        XCTAssertFalse(values.contains("Extra 100"))
+        XCTAssertFalse(values.contains(long))
+        assertAbsent("language", in: body)
+        assertAbsent("format", in: body)
+        assertField("diarize", equals: "true", in: body)
+        assertLastMultipartField(named: "file", in: body)
+    }
+
+    func testKeyTermsRoundTripThroughUserDefaults() throws {
+        let suite = "OpenRecGrokKeyTerms-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertNil(defaults.string(forKey: GrokTranscriptionKeyTerms.defaultsKey))
+        XCTAssertEqual(GrokTranscriptionKeyTerms.resolved(from: nil), [])
+        XCTAssertEqual(GrokTranscriptionKeyTerms.resolved(from: ""), [])
+        XCTAssertEqual(GrokTranscriptionKeyTerms.resolved(from: "not-json"), [])
+        XCTAssertEqual(
+            GrokTranscriptionKeyTerms.resolved(from: "Understand The Universe, OpenRec"),
+            []
+        )
+        XCTAssertEqual(GrokTranscriptionKeyTerms.stored(in: defaults), [])
+
+        GrokTranscriptionKeyTerms.store([], in: defaults)
+        let emptyJSON = try XCTUnwrap(defaults.string(forKey: GrokTranscriptionKeyTerms.defaultsKey))
+        XCTAssertEqual(emptyJSON.trimmingCharacters(in: .whitespacesAndNewlines), "[]")
+        XCTAssertNil(defaults.array(forKey: GrokTranscriptionKeyTerms.defaultsKey))
+        XCTAssertEqual(GrokTranscriptionKeyTerms.stored(in: defaults), [])
+
+        let long = String(repeating: "B", count: 60)
+        var input = [
+            "  Understand The Universe  ",
+            "",
+            "   ",
+            long,
+            "Open  Rec",
+            "zeta term",
+            "Alpha",
+        ]
+        input.append(contentsOf: (1...100).map { "Extra \($0)" })
+        GrokTranscriptionKeyTerms.store(input, in: defaults)
+
+        let storedJSON = try XCTUnwrap(defaults.string(forKey: GrokTranscriptionKeyTerms.defaultsKey))
+        XCTAssertTrue(storedJSON.hasPrefix("["))
+        XCTAssertTrue(storedJSON.contains("\"Understand The Universe\""))
+        XCTAssertNil(defaults.array(forKey: GrokTranscriptionKeyTerms.defaultsKey))
+
+        let loaded = GrokTranscriptionKeyTerms.stored(in: defaults)
+        XCTAssertEqual(loaded.count, 100)
+        XCTAssertEqual(loaded[0], "Understand The Universe")
+        XCTAssertEqual(loaded[1], String(repeating: "B", count: 50))
+        XCTAssertEqual(loaded[2], "Open  Rec")
+        XCTAssertEqual(loaded[3], "zeta term")
+        XCTAssertEqual(loaded[4], "Alpha")
+        XCTAssertEqual(loaded[5], "Extra 1")
+        XCTAssertEqual(loaded.last, "Extra 95")
+        XCTAssertFalse(loaded.contains("Extra 96"))
+        XCTAssertEqual(loaded, GrokTranscriptionKeyTerms.normalized(input))
+
+        let exactlyFifty = String(repeating: "é", count: 50)
+        GrokTranscriptionKeyTerms.store(["  \(exactlyFifty)  ", "  "], in: defaults)
+        XCTAssertEqual(GrokTranscriptionKeyTerms.stored(in: defaults), [exactlyFifty])
+
+        let unnormalized = "[\"  Understand The Universe  \",\"\",\"\(long)\"]"
+        defaults.set(unnormalized, forKey: GrokTranscriptionKeyTerms.defaultsKey)
+        XCTAssertEqual(
+            GrokTranscriptionKeyTerms.stored(in: defaults),
+            ["Understand The Universe", String(repeating: "B", count: 50)]
+        )
+
+        GrokTranscriptionKeyTerms.store(["Understand The Universe", "OpenRec"], in: defaults)
+        let audioURL = try temporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL.deletingLastPathComponent()) }
+        let body = try bodyData(
+            from: try GrokService(apiKey: apiKey).makeTranscriptionRequest(
+                fileURL: audioURL,
+                language: GrokTranscriptionLanguage.stored(in: defaults),
+                keyTerms: GrokTranscriptionKeyTerms.stored(in: defaults)
+            )
+        )
+        XCTAssertEqual(
+            multipartFieldValues(named: "keyterm", in: body),
+            ["Understand The Universe", "OpenRec"]
+        )
+        assertAbsent("language", in: body)
+        assertAbsent("format", in: body)
+        assertLastMultipartField(named: "file", in: body)
+    }
+
     func testPickerUsesOfficialBaseLanguageCodes() {
         XCTAssertEqual(GrokTranscriptionLanguage.allCases.first, .autoDetect)
         XCTAssertEqual(GrokTranscriptionLanguage.autoDetect.displayName, "Auto-Detect")
@@ -537,6 +798,29 @@ final class GrokServiceTests: XCTestCase {
         let audioURL = directory.appendingPathComponent("call.m4a")
         try Data("not-a-real-recording".utf8).write(to: audioURL)
         return audioURL
+    }
+
+    /// Reads repeated form-data values by matching `; name="` and then the
+    /// quoted field name. A search for `name="` also matches `filename="`.
+    private func multipartFieldValues(named name: String, in body: Data) -> [String] {
+        let marker = Data("; name=\"\(name)\"".utf8)
+        let separator = Data("\r\n\r\n".utf8)
+        let lineEnd = Data("\r\n".utf8)
+        var values: [String] = []
+        var search = body.startIndex
+        while let range = body.range(of: marker, in: search..<body.endIndex) {
+            let afterName = range.upperBound
+            guard let separatorRange = body.range(of: separator, in: afterName..<body.endIndex),
+                  separatorRange.lowerBound == afterName else {
+                search = afterName
+                continue
+            }
+            let contentStart = separatorRange.upperBound
+            guard let end = body.range(of: lineEnd, in: contentStart..<body.endIndex) else { break }
+            values.append(String(data: body[contentStart..<end.lowerBound], encoding: .utf8) ?? "")
+            search = end.upperBound
+        }
+        return values
     }
 
     private func assertField(
