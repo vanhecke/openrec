@@ -6,6 +6,7 @@ struct FloatingPanelView: View {
     @ObservedObject var windowState: WindowState
     let onOpenSettings: () -> Void
     let onOpenLibrary: (_ focusLastSaved: Bool) -> Void
+    @State private var savedConfirmationDismissal: DispatchWorkItem?
 
     private var showRightPanel: Bool {
         guard !windowState.isCollapsed else { return false }
@@ -14,8 +15,16 @@ struct FloatingPanelView: View {
 
     var body: some View {
         ZStack {
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+            VisualEffectView(
+                material: .hudWindow,
+                blendingMode: .behindWindow,
+                allowsHitTesting: false
+            )
+            .allowsHitTesting(false)
+            // Behind the controls: empty chrome starts a window drag, and
+            // buttons, fields, and menus in front keep their clicks.
             Color.black.opacity(0.45)
+                .recorderWindowDragRegion()
 
             HStack(alignment: .top, spacing: 0) {
                 VStack(spacing: 0) {
@@ -38,6 +47,7 @@ struct FloatingPanelView: View {
                     }
 
                     Spacer(minLength: 0)
+                        .recorderWindowDragRegion()
                 }
                 .frame(width: 240)
 
@@ -56,6 +66,38 @@ struct FloatingPanelView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
+        .onAppear {
+            scheduleSavedConfirmationDismissal(for: recorderManager.savedConfirmationState)
+        }
+        .onChange(of: recorderManager.savedConfirmationState) { state in
+            scheduleSavedConfirmationDismissal(for: state)
+        }
+    }
+
+    /// Arms the few-second lifetime of "Saved to Meetings" / View meeting.
+    /// The token includes the meeting id, so a newer save is not cleared by
+    /// the previous timer. `lastSavedMeetingID` itself is left set.
+    private func scheduleSavedConfirmationDismissal(for state: SavedConfirmation.HUDState) {
+        savedConfirmationDismissal?.cancel()
+        guard state.savePhase.isSaved else {
+            savedConfirmationDismissal = nil
+            return
+        }
+        let savedAt = Date()
+        let deadline = SavedConfirmation.autoDismissDeadline(savedAt: savedAt)
+        let manager = recorderManager
+        let item = DispatchWorkItem {
+            guard SavedConfirmation.shouldAutoDismiss(
+                scheduled: state,
+                current: manager.savedConfirmationState,
+                now: Date(),
+                deadline: deadline,
+                timerFired: true
+            ) else { return }
+            manager.dismissSavedConfirmation()
+        }
+        savedConfirmationDismissal = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + SavedConfirmation.visibleDuration, execute: item)
     }
 }
 
@@ -83,15 +125,21 @@ private struct HeaderView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(recorderManager.isRecording ? Color.red : Color.white.opacity(0.35))
-                .frame(width: 6, height: 6)
+            // Title and the flexible gap are the drag handle. Settings,
+            // collapse, and quit stay outside this region so they still click.
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(recorderManager.isRecording ? Color.red : Color.white.opacity(0.35))
+                    .frame(width: 6, height: 6)
 
-            Text("OpenRec")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white.opacity(0.9))
+                Text("OpenRec")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.9))
 
-            Spacer()
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .recorderWindowDragRegion()
 
             Button(action: onOpenSettings) {
                 Image(systemName: "gearshape")
@@ -283,7 +331,9 @@ private struct CompactControlsView: View {
                     .foregroundColor(.white.opacity(0.65))
                     .lineLimit(1)
             }
+            .recorderWindowDragRegion()
             Spacer()
+                .recorderWindowDragRegion()
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 18)
@@ -538,6 +588,22 @@ private func preferenceBinding(_ manager: RecorderManager, _ path: WritableKeyPa
         get: { manager.currentCallPreferences[keyPath: path] },
         set: { manager.setActiveCallPreference(path, to: $0) }
     )
+}
+
+extension View {
+    /// Drag the recorder window from this chrome. macOS 15+ only.
+    /// Apply it to empty areas and non-interactive labels, not to a container
+    /// that also holds buttons, fields, or menus.
+    @ViewBuilder
+    func recorderWindowDragRegion() -> some View {
+        if #available(macOS 15.0, *) {
+            self.contentShape(Rectangle())
+                .gesture(WindowDragGesture())
+                .allowsWindowActivationEvents()
+        } else {
+            self
+        }
+    }
 }
 
 private func formatDuration(_ seconds: TimeInterval) -> String {

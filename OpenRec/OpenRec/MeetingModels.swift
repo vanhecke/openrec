@@ -77,6 +77,54 @@ enum SavePhase: Equatable {
     }
 }
 
+/// How long the idle recorder keeps the post-save confirmation before the
+/// status line returns to "Start Recording".
+enum SavedConfirmation {
+    /// Long enough to read "Saved to Meetings" and click View meeting.
+    static let visibleDuration: TimeInterval = 5
+
+    struct HUDState: Equatable {
+        var savePhase: SavePhase
+        var statusMessage: String?
+        var lastSavedMeetingID: UUID?
+    }
+
+    static func showsViewMeeting(_ state: HUDState) -> Bool {
+        state.savePhase.isSaved && state.lastSavedMeetingID != nil
+    }
+
+    /// Drops the saved banner so the idle panel shows "Start Recording".
+    /// Leaves `lastSavedMeetingID` set.
+    static func afterDismissal(_ state: HUDState) -> HUDState {
+        guard state.savePhase.isSaved else { return state }
+        var next = state
+        next.savePhase = .idle
+        next.statusMessage = nil
+        return next
+    }
+
+    static func autoDismissDeadline(savedAt: Date) -> Date {
+        savedAt.addingTimeInterval(visibleDuration)
+    }
+
+    /// True when this scheduled banner should clear.
+    /// `timerFired` covers a callback that runs a few milliseconds early.
+    /// A newer save (different phase or meeting id) must not be cleared by
+    /// the previous timer.
+    static func shouldAutoDismiss(
+        scheduled: HUDState,
+        current: HUDState,
+        now: Date,
+        deadline: Date,
+        timerFired: Bool = false
+    ) -> Bool {
+        guard scheduled.savePhase.isSaved else { return false }
+        guard timerFired || now >= deadline else { return false }
+        return current.savePhase == scheduled.savePhase
+            && current.lastSavedMeetingID == scheduled.lastSavedMeetingID
+    }
+}
+
 struct MeetingActionItem: Codable, Identifiable, Equatable {
     var id = UUID()
     let owner: String
