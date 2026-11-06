@@ -154,6 +154,15 @@ final class RecorderManager: ObservableObject {
     @Published private(set) var activeCallPreferences: CallPreferences?
     @Published var detectedCall: DetectedCall?
     @Published var lastSavedMeetingID: UUID?
+
+    var savedConfirmationState: SavedConfirmation.HUDState {
+        SavedConfirmation.HUDState(
+            savePhase: savePhase,
+            statusMessage: lastErrorMessage,
+            lastSavedMeetingID: lastSavedMeetingID
+        )
+    }
+
     @Published private(set) var cloudUploadProgress: MediaStreamingProgress?
     struct ReadyUpdate: Equatable {
         let version: String
@@ -332,6 +341,16 @@ final class RecorderManager: ObservableObject {
         guard !isRecording, !isStarting, !isProcessing else { return }
         lastSuggestedMeetingName = event.title
         clientNameInput = event.title
+    }
+
+    /// Hides "Saved to Meetings" and View meeting. Does not forget which
+    /// meeting was just saved.
+    func dismissSavedConfirmation() {
+        let current = savedConfirmationState
+        let next = SavedConfirmation.afterDismissal(current)
+        guard next != current else { return }
+        savePhase = next.savePhase
+        lastErrorMessage = next.statusMessage
     }
 
     func startRecording() async {

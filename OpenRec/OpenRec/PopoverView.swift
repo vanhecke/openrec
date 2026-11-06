@@ -99,19 +99,31 @@ struct PopoverContentView: View {
                         Text(" ")
                             .font(.system(size: 12, weight: .medium))
                     } else if case .complete = recorderManager.savePhase {
-                        Label("Saved to Meetings", systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.green.opacity(0.9))
-                    } else if case .completeWithWarning(let warning) = recorderManager.savePhase {
-                        VStack(spacing: 3) {
-                            Label("Saved with a warning", systemImage: "exclamationmark.circle.fill")
-                                .font(.system(size: 10, weight: .semibold))
-                            Text(warning)
-                                .font(.system(size: 9, weight: .medium))
-                                .multilineTextAlignment(.center)
-                                .lineLimit(3)
+                        VStack(spacing: 4) {
+                            Label("Saved to Meetings", systemImage: "checkmark.circle.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.green.opacity(0.9))
+                                .recorderWindowDragRegion()
+                            if SavedConfirmation.showsViewMeeting(recorderManager.savedConfirmationState) {
+                                viewMeetingButton
+                            }
                         }
-                        .foregroundColor(.orange.opacity(0.9))
+                    } else if case .completeWithWarning(let warning) = recorderManager.savePhase {
+                        VStack(spacing: 4) {
+                            VStack(spacing: 3) {
+                                Label("Saved with a warning", systemImage: "exclamationmark.circle.fill")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text(warning)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(3)
+                            }
+                            .foregroundColor(.orange.opacity(0.9))
+                            .recorderWindowDragRegion()
+                            if SavedConfirmation.showsViewMeeting(recorderManager.savedConfirmationState) {
+                                viewMeetingButton
+                            }
+                        }
                     } else if let error = recorderManager.lastErrorMessage {
                         Text(error)
                             .font(.system(size: 10, weight: .medium))
@@ -119,10 +131,12 @@ struct PopoverContentView: View {
                             .multilineTextAlignment(.center)
                             .lineLimit(4)
                             .fixedSize(horizontal: false, vertical: true)
+                            .recorderWindowDragRegion()
                     } else {
                         Text("Start Recording")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.white.opacity(0.5))
+                            .recorderWindowDragRegion()
                     }
                 }
                 .frame(minHeight: 26)
@@ -134,23 +148,15 @@ struct PopoverContentView: View {
                     .buttonStyle(.plain)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.white.opacity(0.72))
-                } else if recorderManager.savePhase.isSaved, recorderManager.lastSavedMeetingID != nil {
-                    Button("View meeting") { onOpenLibrary(true) }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.78))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.white.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
             }
-            // minHeight, not a fixed height: the saved state adds a "View
-            // meeting" button that must push the fields below it down instead
-            // of overflowing onto them.
+            // minHeight, not a fixed height: a multi-line error must push the
+            // fields down instead of drawing on top of them. The saved
+            // confirmation lives in the status line and dismisses itself.
             .frame(minHeight: recorderManager.lastErrorMessage == nil ? 112 : 142)
 
             Spacer(minLength: 0)
+                .recorderWindowDragRegion()
 
             // Bottom buttons - fixed at bottom
             VStack(spacing: 6) {
@@ -282,6 +288,7 @@ struct PopoverContentView: View {
                         .foregroundColor(Color.white.opacity(0.28))
                         .frame(maxWidth: .infinity)
                         .padding(.top, 2)
+                        .recorderWindowDragRegion()
                 }
             }
             .padding(.horizontal, 14)
@@ -292,6 +299,20 @@ struct PopoverContentView: View {
                 }
             }
         }
+    }
+
+    private var viewMeetingButton: some View {
+        Button("View meeting") {
+            onOpenLibrary(true)
+            recorderManager.dismissSavedConfirmation()
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundColor(.white.opacity(0.78))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
     static let versionLabel: String = {
