@@ -5,6 +5,17 @@ enum StorageMode: String, CaseIterable, Identifiable, Codable {
     case ownR2
     case local
 
+    static let defaultsKey = "StorageMode"
+
+    /// Missing or unrecognized stored values use This Mac. Explicit
+    /// `managed`, `ownR2`, and `local` values are returned unchanged.
+    static func resolved(from stored: String?) -> StorageMode {
+        guard let stored, let mode = StorageMode(rawValue: stored) else {
+            return .local
+        }
+        return mode
+    }
+
     var id: String { rawValue }
     var label: String {
         switch self {

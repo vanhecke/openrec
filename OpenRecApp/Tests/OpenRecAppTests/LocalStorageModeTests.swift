@@ -47,15 +47,67 @@ final class LocalStorageModeTests: XCTestCase {
         ))
     }
 
-    func testUnsetStorageModeDefaultsToManagedAndKnownRawValuesStayStable() {
+    func testUnsetStorageModeDefaultsToLocalAndKnownRawValuesStayStable() {
         XCTAssertNil(StorageMode(rawValue: ""))
-        XCTAssertEqual(StorageMode(rawValue: "") ?? .managed, .managed)
-        XCTAssertEqual(StorageMode(rawValue: "managed"), .managed)
-        XCTAssertEqual(StorageMode(rawValue: "ownR2"), .ownR2)
-        XCTAssertEqual(StorageMode(rawValue: "local"), .local)
+        XCTAssertEqual(StorageMode.resolved(from: nil), .local)
+        XCTAssertEqual(StorageMode.resolved(from: ""), .local)
+        XCTAssertEqual(StorageMode.resolved(from: "not-a-mode"), .local)
+        XCTAssertEqual(StorageMode.resolved(from: "managed"), .managed)
+        XCTAssertEqual(StorageMode.resolved(from: "ownR2"), .ownR2)
+        XCTAssertEqual(StorageMode.resolved(from: "local"), .local)
+        XCTAssertEqual(StorageMode.managed.rawValue, "managed")
+        XCTAssertEqual(StorageMode.ownR2.rawValue, "ownR2")
+        XCTAssertEqual(StorageMode.local.rawValue, "local")
         XCTAssertEqual(StorageMode.managed.label, "OpenRec Cloud")
         XCTAssertEqual(StorageMode.ownR2.label, "My R2")
         XCTAssertEqual(StorageMode.local.label, "This Mac")
+    }
+
+    @MainActor
+    func testFreshStorageManagerDefaultsToLocalAndKeepsExplicitChoices() throws {
+        let key = StorageMode.defaultsKey
+        let previous = UserDefaults.standard.string(forKey: key)
+        defer {
+            if let previous {
+                UserDefaults.standard.set(previous, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+
+        func manager(stored: String?) -> CloudStorageManager {
+            if let stored {
+                UserDefaults.standard.set(stored, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+            return CloudStorageManager()
+        }
+
+        let fresh = manager(stored: nil)
+        XCTAssertEqual(fresh.mode, .local)
+        XCTAssertNil(UserDefaults.standard.string(forKey: key))
+        XCTAssertTrue(fresh.isReady)
+        XCTAssertEqual(try fresh.captureStorageContext().mode, .local)
+
+        let empty = manager(stored: "")
+        XCTAssertEqual(empty.mode, .local)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: key), "")
+        XCTAssertTrue(empty.isReady)
+
+        let unknown = manager(stored: "not-a-mode")
+        XCTAssertEqual(unknown.mode, .local)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: key), "not-a-mode")
+
+        for raw in ["managed", "ownR2", "local"] {
+            let stored = manager(stored: raw)
+            XCTAssertEqual(stored.mode.rawValue, raw)
+            XCTAssertEqual(UserDefaults.standard.string(forKey: key), raw)
+        }
+
+        let local = manager(stored: "local")
+        XCTAssertTrue(local.isReady)
+        XCTAssertEqual(try local.captureStorageContext().mode, .local)
     }
 
     @MainActor
@@ -67,12 +119,12 @@ final class LocalStorageModeTests: XCTestCase {
         XCTAssertTrue(StorageMode.ownR2.onboardingCanContinue(isReady: true, r2ConnectionVerified: true))
         XCTAssertFalse(StorageMode.ownR2.onboardingCanContinue(isReady: false, r2ConnectionVerified: true))
 
-        let previous = UserDefaults.standard.string(forKey: "StorageMode")
+        let previous = UserDefaults.standard.string(forKey: StorageMode.defaultsKey)
         defer {
             if let previous {
-                UserDefaults.standard.set(previous, forKey: "StorageMode")
+                UserDefaults.standard.set(previous, forKey: StorageMode.defaultsKey)
             } else {
-                UserDefaults.standard.removeObject(forKey: "StorageMode")
+                UserDefaults.standard.removeObject(forKey: StorageMode.defaultsKey)
             }
         }
 
