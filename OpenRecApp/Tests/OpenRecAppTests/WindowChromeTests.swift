@@ -48,6 +48,43 @@ final class WindowChromeTests: XCTestCase {
         XCTAssertFalse(window.ignoresMouseEvents)
     }
 
+    func testOnboardingUsesOrdinaryLevelAndSpacesOnly() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.level = .floating
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        window.hidesOnDeactivate = false
+        window.ignoresMouseEvents = false
+        window.isMovableByWindowBackground = true
+        window.isReleasedWhenClosed = false
+
+        WindowChrome.applyOnboardingStacking(to: window)
+
+        XCTAssertEqual(window.level, .normal)
+        XCTAssertEqual(window.level, WindowStackingPolicy.ordinary.level)
+        XCTAssertLessThan(window.level, .floating)
+        XCTAssertEqual(window.collectionBehavior, WindowStackingPolicy.ordinary.collectionBehavior)
+        XCTAssertTrue(window.collectionBehavior.contains(.managed))
+        XCTAssertTrue(window.collectionBehavior.contains(.participatesInCycle))
+        XCTAssertFalse(window.collectionBehavior.contains(.canJoinAllSpaces))
+        XCTAssertFalse(window.collectionBehavior.contains(.fullScreenAuxiliary))
+        XCTAssertFalse(window.collectionBehavior.contains(.moveToActiveSpace))
+        XCTAssertFalse(window.collectionBehavior.contains(.stationary))
+        XCTAssertFalse(window.collectionBehavior.contains(.transient))
+        XCTAssertFalse(window.hidesOnDeactivate)
+        XCTAssertFalse(window.ignoresMouseEvents)
+        XCTAssertTrue(window.isMovableByWindowBackground)
+        XCTAssertFalse(window.isReleasedWhenClosed)
+
+        let recorder = makeRecorder()
+        XCTAssertEqual(window.level, recorder.level)
+        XCTAssertEqual(window.collectionBehavior, recorder.collectionBehavior)
+    }
+
     func testRecordingBorderStaysAboveEverySpace() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 200, height: 200),
