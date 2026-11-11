@@ -166,14 +166,13 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
         r2AccessKeyID: String,
         r2SecretAccessKey: String
     ) -> Bool {
-        switch mode {
-        case .managed:
-            return managedSignedIn
-        case .ownR2:
-            return !r2AccountID.isEmpty && !r2Bucket.isEmpty && !r2AccessKeyID.isEmpty && !r2SecretAccessKey.isEmpty
-        case .local:
-            return true
-        }
+        mode.isReadyForRecording(
+            managedSignedIn: managedSignedIn,
+            r2AccountID: r2AccountID,
+            r2Bucket: r2Bucket,
+            r2AccessKeyID: r2AccessKeyID,
+            r2SecretAccessKey: r2SecretAccessKey
+        )
     }
 
     func captureStorageContext(for requestedMode: StorageMode? = nil) throws -> CloudStorageContext {
