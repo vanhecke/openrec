@@ -5,57 +5,115 @@ import CoreGraphics
 
 enum OpenRecOnboarding {
     static let completionKey = "OpenRecOnboardingCompletedV1"
+    static let stepKey = "OpenRecOnboardingStepV1"
+    static let assemblyKeychainAccount = "assemblyai-api-key"
+    static let managedSessionKeychainAccount = "managed-session-token"
+    static let r2AccessKeyIDAccount = "r2-access-key-id"
+    static let r2SecretAccessKeyAccount = "r2-secret-access-key"
 
     static var isComplete: Bool {
-        currentReadiness().isComplete
+        switch OnboardingLaunch.decide(currentLaunchInput()) {
+        case .skip:
+            return true
+        case .wizard(_):
+            return false
+        }
     }
 
-    static func currentReadiness() -> OnboardingReadiness {
+    /// Step to show when the wizard is on screen. A ready launch never gets here.
+    static func presentationStep() -> OnboardingStep {
+        switch OnboardingLaunch.decide(currentLaunchInput()) {
+        case .skip:
+            return .welcome
+        case .wizard(let step):
+            return step
+        }
+    }
+
+    static func currentLaunchInput(defaults: UserDefaults = .standard) -> OnboardingLaunchInput {
+        let readiness = currentReadiness(defaults: defaults)
+        return OnboardingLaunchInput(
+            markedComplete: readiness.markedComplete,
+            persistedStep: persistedWizardStep(defaults: defaults),
+            microphone: microphonePermission(),
+            screen: screenPermission(),
+            transcription: readiness.transcription,
+            meetingMemory: readiness.meetingMemory,
+            storage: storageConfiguration(defaults: defaults)
+        )
+    }
+
+    static func currentReadiness(defaults: UserDefaults = .standard) -> OnboardingReadiness {
         OnboardingReadiness(
-            markedComplete: UserDefaults.standard.bool(forKey: completionKey),
+            markedComplete: defaults.bool(forKey: completionKey),
             transcription: TranscriptionCredentials(
                 provider: TranscriptionProvider.resolved(
-                    from: UserDefaults.standard.string(forKey: TranscriptionProvider.defaultsKey)
+                    from: defaults.string(forKey: TranscriptionProvider.defaultsKey)
                 ),
-                assemblyKey: KeychainStore.string(for: "assemblyai-api-key"),
-                assemblyVerified: UserDefaults.standard.bool(forKey: "AssemblyAIKeyVerified"),
+                assemblyKey: KeychainStore.string(for: assemblyKeychainAccount),
+                assemblyVerified: defaults.bool(forKey: "AssemblyAIKeyVerified"),
                 grokKey: KeychainStore.string(for: MeetingMemoryProvider.grokKeychainAccount),
-                grokVerified: UserDefaults.standard.bool(forKey: MeetingMemoryProvider.grokVerifiedDefaultsKey)
+                grokVerified: defaults.bool(forKey: MeetingMemoryProvider.grokVerifiedDefaultsKey)
             ),
             meetingMemory: MeetingMemoryCredentials(
                 provider: MeetingMemoryProvider.resolved(
-                    from: UserDefaults.standard.string(forKey: MeetingMemoryProvider.defaultsKey)
+                    from: defaults.string(forKey: MeetingMemoryProvider.defaultsKey)
                 ),
                 openAIKey: KeychainStore.string(for: MeetingMemoryProvider.openAIKeychainAccount),
-                openAIVerified: UserDefaults.standard.bool(forKey: MeetingMemoryProvider.openAIVerifiedDefaultsKey),
+                openAIVerified: defaults.bool(forKey: MeetingMemoryProvider.openAIVerifiedDefaultsKey),
                 grokKey: KeychainStore.string(for: MeetingMemoryProvider.grokKeychainAccount),
-                grokVerified: UserDefaults.standard.bool(forKey: MeetingMemoryProvider.grokVerifiedDefaultsKey)
+                grokVerified: defaults.bool(forKey: MeetingMemoryProvider.grokVerifiedDefaultsKey)
             )
         )
     }
 
-    static func markComplete() {
-        UserDefaults.standard.set(true, forKey: completionKey)
+    /// Readiness of the mode already stored. Does not change that selection.
+    static func storageConfiguration(defaults: UserDefaults = .standard) -> OnboardingStorageConfiguration {
+        let mode = StorageMode.resolvedStoredSelection(defaults.string(forKey: "StorageMode"))
+        let ready = mode.isReadyForRecording(
+            managedSignedIn: !KeychainStore.string(for: managedSessionKeychainAccount).isEmpty,
+            r2AccountID: defaults.string(forKey: "R2AccountID") ?? "",
+            r2Bucket: defaults.string(forKey: "R2Bucket") ?? "",
+            r2AccessKeyID: KeychainStore.string(for: r2AccessKeyIDAccount),
+            r2SecretAccessKey: KeychainStore.string(for: r2SecretAccessKeyAccount)
+        )
+        return OnboardingStorageConfiguration(
+            mode: mode,
+            isReady: ready,
+            r2ConnectionVerified: defaults.bool(forKey: "R2ConnectionVerified")
+        )
     }
-}
 
-private enum OnboardingStep: Int, CaseIterable {
-    case welcome
-    case assemblyAI
-    case meetingMemory
-    case storage
-    case calendar
-    case defaults
-    case webhook
-    case permissions
-    case ready
+    static func microphonePermission() -> OnboardingPermissionState {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return .allowed
+        case .denied, .restricted:
+            return .denied
+        case .notDetermined:
+            return .notDetermined
+        @unknown default:
+            return .denied
+        }
+    }
 
-    static let configurationSteps: [OnboardingStep] = [
-        .assemblyAI, .meetingMemory, .storage, .calendar, .defaults, .webhook, .permissions
-    ]
+    /// Screen Recording preflight does not prompt, and it does not separate
+    /// "not yet asked" from "denied". Either result is not an allow.
+    static func screenPermission() -> OnboardingPermissionState {
+        CGPreflightScreenCaptureAccess() ? .allowed : .denied
+    }
 
-    var configurationIndex: Int? {
-        Self.configurationSteps.firstIndex(of: self)
+    static func persistedWizardStep(defaults: UserDefaults = .standard) -> OnboardingStep? {
+        OnboardingStep.matchingPersistenceID(defaults.string(forKey: stepKey))
+    }
+
+    static func persistWizardStep(_ step: OnboardingStep, defaults: UserDefaults = .standard) {
+        defaults.set(step.persistenceID, forKey: stepKey)
+    }
+
+    static func markComplete(defaults: UserDefaults = .standard) {
+        defaults.set(true, forKey: completionKey)
+        defaults.removeObject(forKey: stepKey)
     }
 }
 
@@ -104,7 +162,7 @@ struct OpenRecOnboardingView: View {
         self.recorderManager = recorderManager
         self.isSettings = isSettings
         self.onFinish = onFinish
-        _step = State(initialValue: isSettings ? .assemblyAI : .welcome)
+        _step = State(initialValue: isSettings ? .assemblyAI : OpenRecOnboarding.presentationStep())
     }
 
     var body: some View {
@@ -1058,6 +1116,9 @@ struct OpenRecOnboardingView: View {
         withAnimation(reduceMotion ? .easeOut(duration: 0.12) : onboardingEaseOut) {
             step = nextStep
         }
+        if !isSettings {
+            OpenRecOnboarding.persistWizardStep(nextStep)
+        }
         if nextStep == .permissions { refreshPermissions() }
         if nextStep == .calendar {
             googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
@@ -1110,6 +1171,9 @@ struct OpenRecOnboardingView: View {
     }
 
     private func prepareOnboarding() {
+        if !isSettings {
+            OpenRecOnboarding.persistWizardStep(step)
+        }
         refreshPermissions()
         if recorderManager.transcriptionManager.isAssemblyAIAPIKeyVerified {
             assemblyAICheck = .success("Key verified with AssemblyAI")

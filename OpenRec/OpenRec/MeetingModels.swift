@@ -37,6 +37,32 @@ enum StorageMode: String, CaseIterable, Identifiable, Codable {
             return r2ConnectionVerified
         }
     }
+
+    /// Stored selection, including the unset fallback already used by
+    /// `CloudStorageManager`. Callers then judge readiness from that mode.
+    static func resolvedStoredSelection(_ stored: String?) -> StorageMode {
+        StorageMode(rawValue: stored ?? "") ?? .managed
+    }
+
+    /// Whether the selected mode has the credentials it needs. Empty strings,
+    /// including Keychain reads that failed closed, are not ready.
+    func isReadyForRecording(
+        managedSignedIn: Bool,
+        r2AccountID: String,
+        r2Bucket: String,
+        r2AccessKeyID: String,
+        r2SecretAccessKey: String
+    ) -> Bool {
+        switch self {
+        case .managed:
+            return managedSignedIn
+        case .ownR2:
+            return !r2AccountID.isEmpty && !r2Bucket.isEmpty
+                && !r2AccessKeyID.isEmpty && !r2SecretAccessKey.isEmpty
+        case .local:
+            return true
+        }
+    }
 }
 
 struct CallPreferences: Codable, Equatable {
@@ -732,10 +758,141 @@ struct OnboardingReadiness: Equatable {
     var transcription: TranscriptionCredentials
     var meetingMemory: MeetingMemoryCredentials
 
+    /// Saved flag plus the selected keys. Launch uses `OnboardingLaunch`,
+    /// which also checks live permissions and the selected storage mode.
     var isComplete: Bool {
         markedComplete
             && transcription.isSelectedKeyVerified
             && meetingMemory.isSelectedKeyVerified
+    }
+}
+
+enum OnboardingStep: Int, CaseIterable {
+    case welcome
+    case assemblyAI
+    case meetingMemory
+    case storage
+    case calendar
+    case defaults
+    case webhook
+    case permissions
+    case ready
+
+    static let configurationSteps: [OnboardingStep] = [
+        .assemblyAI, .meetingMemory, .storage, .calendar, .defaults, .webhook, .permissions
+    ]
+
+    var configurationIndex: Int? {
+        Self.configurationSteps.firstIndex(of: self)
+    }
+
+    /// Stable id. The integer raw value is only the on-screen order.
+    var persistenceID: String {
+        switch self {
+        case .welcome: return "welcome"
+        case .assemblyAI: return "assemblyAI"
+        case .meetingMemory: return "meetingMemory"
+        case .storage: return "storage"
+        case .calendar: return "calendar"
+        case .defaults: return "defaults"
+        case .webhook: return "webhook"
+        case .permissions: return "permissions"
+        case .ready: return "ready"
+        }
+    }
+
+    static func matchingPersistenceID(_ raw: String?) -> OnboardingStep? {
+        guard let raw else { return nil }
+        return allCases.first { $0.persistenceID == raw }
+    }
+}
+
+enum OnboardingPermissionState: Equatable {
+    case allowed
+    case denied
+    case notDetermined
+
+    var isAllowed: Bool {
+        switch self {
+        case .allowed:
+            return true
+        case .denied, .notDetermined:
+            return false
+        }
+    }
+}
+
+struct OnboardingStorageConfiguration: Equatable {
+    var mode: StorageMode
+    var isReady: Bool
+    var r2ConnectionVerified: Bool
+
+    var canContinue: Bool {
+        mode.onboardingCanContinue(isReady: isReady, r2ConnectionVerified: r2ConnectionVerified)
+    }
+}
+
+struct OnboardingLaunchInput: Equatable {
+    var markedComplete: Bool
+    /// Where the wizard last saved its place. Ignored once required setup is ready.
+    var persistedStep: OnboardingStep?
+    var microphone: OnboardingPermissionState
+    var screen: OnboardingPermissionState
+    var transcription: TranscriptionCredentials
+    var meetingMemory: MeetingMemoryCredentials
+    var storage: OnboardingStorageConfiguration
+
+    var requiredPermissionsAllowed: Bool {
+        microphone.isAllowed && screen.isAllowed
+    }
+
+    var selectedProvidersReady: Bool {
+        transcription.isSelectedKeyVerified && meetingMemory.isSelectedKeyVerified
+    }
+
+    var requiredConfigurationReady: Bool {
+        selectedProvidersReady && storage.canContinue && requiredPermissionsAllowed
+    }
+}
+
+enum OnboardingLaunchAction: Equatable {
+    case skip
+    case wizard(OnboardingStep)
+}
+
+enum OnboardingLaunch {
+    /// Skip only when the selected provider keys are readable and verified,
+    /// the selected storage mode can continue, and microphone plus screen
+    /// recording are allowed. A saved completion flag or step is not enough,
+    /// and a missing flag does not block a launch that already meets those
+    /// checks. Calendar, call defaults, and webhooks stay optional.
+    static func decide(_ input: OnboardingLaunchInput) -> OnboardingLaunchAction {
+        if input.requiredConfigurationReady {
+            return .skip
+        }
+
+        let blocking = firstUnsatisfiedRequiredStep(input)
+        if let persisted = input.persistedStep {
+            // A saved later step must not skip a required step that no longer
+            // holds, and the ready page is not itself evidence of readiness.
+            if persisted.rawValue > blocking.rawValue {
+                return .wizard(blocking)
+            }
+            return .wizard(persisted)
+        }
+        if input.markedComplete
+            || input.transcription.isSelectedKeyVerified
+            || input.meetingMemory.isSelectedKeyVerified {
+            return .wizard(blocking)
+        }
+        return .wizard(.welcome)
+    }
+
+    static func firstUnsatisfiedRequiredStep(_ input: OnboardingLaunchInput) -> OnboardingStep {
+        if !input.transcription.isSelectedKeyVerified { return .assemblyAI }
+        if !input.meetingMemory.isSelectedKeyVerified { return .meetingMemory }
+        if !input.storage.canContinue { return .storage }
+        return .permissions
     }
 }
 

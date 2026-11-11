@@ -166,24 +166,36 @@ final class KeychainStoreTests: XCTestCase {
 
     func testOnboardingReadinessDoesNotRequeryKeychain() {
         let keychain = MemoryKeychain()
-        for account in [assemblyAccount, grokAccount, openAIAccount] {
+        let credentialAccounts = [assemblyAccount, grokAccount, openAIAccount]
+        let storageAccounts = [
+            OpenRecOnboarding.managedSessionKeychainAccount,
+            OpenRecOnboarding.r2AccessKeyIDAccount,
+            OpenRecOnboarding.r2SecretAccessKeyAccount,
+        ]
+        for account in credentialAccounts + storageAccounts {
             keychain.remember(account, value: "stored-value", readable: false)
         }
         KeychainStore.useOperationsForTesting(keychain.operations())
 
         _ = OpenRecOnboarding.currentReadiness()
-        XCTAssertEqual(keychain.copyQueries.map { account(in: $0) }, [
-            assemblyAccount,
-            grokAccount,
-            openAIAccount,
-        ])
+        XCTAssertEqual(keychain.copyQueries.map { account(in: $0) }, credentialAccounts)
+        for query in keychain.copyQueries {
+            assertFailsClosed(query, account: account(in: query), returnsData: true)
+        }
+        XCTAssertTrue(keychain.itemCalls.allSatisfy { !$0.interactionAllowed })
+
+        XCTAssertFalse(OpenRecOnboarding.isComplete)
+        XCTAssertEqual(
+            keychain.copyQueries.map { account(in: $0) },
+            credentialAccounts + storageAccounts
+        )
         for query in keychain.copyQueries {
             assertFailsClosed(query, account: account(in: query), returnsData: true)
         }
         XCTAssertTrue(keychain.itemCalls.allSatisfy { !$0.interactionAllowed })
 
         let copies = keychain.itemCalls.count
-        _ = OpenRecOnboarding.isComplete
+        XCTAssertFalse(OpenRecOnboarding.isComplete)
         XCTAssertEqual(keychain.itemCalls.count, copies)
     }
 
