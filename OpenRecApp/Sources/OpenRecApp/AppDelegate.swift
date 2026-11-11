@@ -331,11 +331,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
-        window.level = .floating
         window.backgroundColor = .clear
         window.isOpaque = false
         window.hasShadow = true
-        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        WindowChrome.applyOnboardingStacking(to: window)
         // The setup window can be shared for support; secrets remain secure
         // fields and Settings cannot be opened during a recording. The
         // recorder window itself stays excluded from captured calls.

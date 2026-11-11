@@ -84,6 +84,14 @@ enum WindowChrome {
         window.ignoresMouseEvents = policy.ignoresMouseEvents
     }
 
+    /// Onboarding is an ordinary window. Only level and Spaces behavior
+    /// change here; readiness and resume stay in the onboarding flow.
+    static func applyOnboardingStacking(to window: NSWindow) {
+        let policy = WindowStackingPolicy.policy(for: .ordinary)
+        window.level = policy.level
+        window.collectionBehavior = policy.collectionBehavior
+    }
+
     static func makeRecorderWindow<Content: View>(size: NSSize, rootView: Content) -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
