@@ -188,7 +188,7 @@ enum WindowChrome {
 /// traffic light. Hits in the button's slot pass through to the real
 /// `NSButton`, whose action is still the window's `performClose:`.
 final class RecorderPanelHostingView<Content: View>: NSHostingView<Content> {
-    override init(rootView: Content) {
+    required init(rootView: Content) {
         super.init(rootView: rootView)
         sizingOptions = []
         clearTitlebarSafeArea()
