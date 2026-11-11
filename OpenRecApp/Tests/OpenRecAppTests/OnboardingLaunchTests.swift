@@ -1,3 +1,4 @@
+import Security
 import XCTest
 @testable import OpenRecApp
 
@@ -25,25 +26,84 @@ final class OnboardingLaunchTests: XCTestCase {
         let input = OnboardingLaunchInput(
             markedComplete: false,
             persistedStep: nil,
+            pendingScreenPermissionRelaunch: false,
             microphone: .notDetermined,
             screen: .notDetermined,
             transcription: credentials(provider: .assemblyAI, assemblyKey: "", assemblyVerified: false),
             meetingMemory: memory(provider: .openai, openAIKey: "", openAIVerified: false),
             storage: OnboardingStorageConfiguration(
-                mode: StorageMode.resolvedStoredSelection(nil),
-                isReady: false,
+                mode: StorageMode.resolved(from: nil),
+                isReady: true,
                 r2ConnectionVerified: false
             )
         )
 
-        XCTAssertEqual(input.storage.mode, .managed)
-        XCTAssertFalse(input.storage.canContinue)
+        XCTAssertEqual(input.storage.mode, .local)
+        XCTAssertTrue(input.storage.canContinue)
         XCTAssertEqual(OnboardingLaunch.decide(input), .wizard(.welcome))
     }
 
-    func testRestartAfterScreenPermissionResumesPermissionsUntilTheGrantIsUsable() {
+    func testUnsetStorageOnTheLaunchPathMatchesTheAppDefault() {
+        let operations = KeychainStore.Operations(
+            copyMatching: { _ in (errSecItemNotFound, nil) },
+            update: { _, _ in errSecParam },
+            delete: { _ in errSecParam },
+            add: { _ in errSecParam },
+            userInteractionAllowed: { true },
+            setUserInteractionAllowed: { _ in }
+        )
+        KeychainStore.useOperationsForTesting(operations)
+        defer { KeychainStore.resetForTesting() }
+
+        XCTAssertNil(defaults.string(forKey: StorageMode.defaultsKey))
+        let unset = OpenRecOnboarding.storageConfiguration(defaults: defaults)
+        XCTAssertEqual(unset.mode, StorageMode.resolved(from: nil))
+        XCTAssertEqual(unset.mode, .local)
+        XCTAssertTrue(unset.isReady)
+        XCTAssertTrue(unset.canContinue)
+        XCTAssertNil(defaults.string(forKey: StorageMode.defaultsKey))
+
+        var ready = readyAssemblyAndOpenAI(storage: unset)
+        ready.persistedStep = .permissions
+        ready.pendingScreenPermissionRelaunch = false
+        ready.markedComplete = false
+        XCTAssertEqual(OnboardingLaunch.decide(ready), .skip)
+
+        defaults.set(StorageMode.managed.rawValue, forKey: StorageMode.defaultsKey)
+        let managed = OpenRecOnboarding.storageConfiguration(defaults: defaults)
+        XCTAssertEqual(managed.mode, .managed)
+        XCTAssertFalse(managed.canContinue)
+        XCTAssertEqual(defaults.string(forKey: StorageMode.defaultsKey), StorageMode.managed.rawValue)
+        XCTAssertEqual(
+            OnboardingLaunch.decide(readyAssemblyAndOpenAI(storage: managed)),
+            .wizard(.storage)
+        )
+
+        defaults.set(StorageMode.ownR2.rawValue, forKey: StorageMode.defaultsKey)
+        let ownR2 = OpenRecOnboarding.storageConfiguration(defaults: defaults)
+        XCTAssertEqual(ownR2.mode, .ownR2)
+        XCTAssertFalse(ownR2.canContinue)
+        XCTAssertEqual(defaults.string(forKey: StorageMode.defaultsKey), StorageMode.ownR2.rawValue)
+
+        defaults.set("account", forKey: "R2AccountID")
+        defaults.set("bucket", forKey: "R2Bucket")
+        defaults.set(true, forKey: "R2ConnectionVerified")
+        let ownR2WithoutSecrets = OpenRecOnboarding.storageConfiguration(defaults: defaults)
+        XCTAssertEqual(ownR2WithoutSecrets.mode, .ownR2)
+        XCTAssertFalse(ownR2WithoutSecrets.isReady)
+        XCTAssertFalse(ownR2WithoutSecrets.canContinue)
+
+        defaults.set(StorageMode.local.rawValue, forKey: StorageMode.defaultsKey)
+        let explicitLocal = OpenRecOnboarding.storageConfiguration(defaults: defaults)
+        XCTAssertEqual(explicitLocal.mode, .local)
+        XCTAssertTrue(explicitLocal.canContinue)
+        XCTAssertEqual(defaults.string(forKey: StorageMode.defaultsKey), StorageMode.local.rawValue)
+    }
+
+    func testScreenPermissionRelaunchContinuesToTheFinalStepOnceReady() {
         var waiting = readyAssemblyAndOpenAI(storage: .localReady)
         waiting.persistedStep = .permissions
+        waiting.pendingScreenPermissionRelaunch = true
         waiting.markedComplete = false
         waiting.microphone = .allowed
         waiting.screen = .denied
@@ -58,13 +118,39 @@ final class OnboardingLaunchTests: XCTestCase {
         XCTAssertEqual(OnboardingLaunch.decide(waiting), .wizard(.permissions))
 
         waiting.microphone = .allowed
-        XCTAssertEqual(OnboardingLaunch.decide(waiting), .skip)
+        XCTAssertEqual(OnboardingLaunch.decide(waiting), .wizard(.ready))
+
+        var staleStep = waiting
+        staleStep.pendingScreenPermissionRelaunch = false
+        XCTAssertEqual(staleStep.persistedStep, .permissions)
+        XCTAssertEqual(OnboardingLaunch.decide(staleStep), .skip)
+
+        var missingStorage = waiting
+        missingStorage.storage = .managedSignedOut
+        XCTAssertEqual(OnboardingLaunch.decide(missingStorage), .wizard(.storage))
+    }
+
+    func testReadyPageKeepsTheScreenPermissionRelaunchPendingUntilFinish() {
+        OpenRecOnboarding.persistWizardStep(.permissions, defaults: defaults)
+        OpenRecOnboarding.persistWizardStep(.ready, defaults: defaults)
+        XCTAssertTrue(defaults.bool(forKey: OpenRecOnboarding.screenPermissionRelaunchKey))
+        XCTAssertEqual(OpenRecOnboarding.persistedWizardStep(defaults: defaults), .ready)
+
+        var showingReady = readyAssemblyAndOpenAI(storage: .localReady)
+        showingReady.pendingScreenPermissionRelaunch = true
+        showingReady.persistedStep = .ready
+        XCTAssertEqual(OnboardingLaunch.decide(showingReady), .wizard(.ready))
+
+        OpenRecOnboarding.persistWizardStep(.calendar, defaults: defaults)
+        XCTAssertFalse(defaults.bool(forKey: OpenRecOnboarding.screenPermissionRelaunchKey))
+        XCTAssertFalse(GoogleCalendarConnectPrompt.isDeclined(in: defaults))
     }
 
     func testReadyConfigurationSkipsEvenWithoutTheCompletionFlag() {
         var input = readyAssemblyAndOpenAI(storage: .localReady)
         input.markedComplete = false
         input.persistedStep = nil
+        input.pendingScreenPermissionRelaunch = false
 
         XCTAssertEqual(OnboardingLaunch.decide(input), .skip)
 
@@ -72,6 +158,7 @@ final class OnboardingLaunchTests: XCTestCase {
         XCTAssertEqual(OnboardingLaunch.decide(input), .skip)
 
         input.persistedStep = .ready
+        input.pendingScreenPermissionRelaunch = true
         input.markedComplete = true
         XCTAssertEqual(OnboardingLaunch.decide(input), .skip)
     }
@@ -165,6 +252,7 @@ final class OnboardingLaunchTests: XCTestCase {
         let unselectedGrok = OnboardingLaunchInput(
             markedComplete: false,
             persistedStep: nil,
+            pendingScreenPermissionRelaunch: false,
             microphone: .allowed,
             screen: .allowed,
             transcription: credentials(
@@ -189,11 +277,12 @@ final class OnboardingLaunchTests: XCTestCase {
     }
 
     func testSelectedStorageDecidesReadiness() {
-        XCTAssertEqual(StorageMode.resolvedStoredSelection(nil), .managed)
-        XCTAssertEqual(StorageMode.resolvedStoredSelection(""), .managed)
-        XCTAssertEqual(StorageMode.resolvedStoredSelection("local"), .local)
-        XCTAssertEqual(StorageMode.resolvedStoredSelection("ownR2"), .ownR2)
-        XCTAssertEqual(StorageMode.resolvedStoredSelection("elsewhere"), .managed)
+        XCTAssertEqual(StorageMode.resolved(from: nil), .local)
+        XCTAssertEqual(StorageMode.resolved(from: ""), .local)
+        XCTAssertEqual(StorageMode.resolved(from: "not-a-mode"), .local)
+        XCTAssertEqual(StorageMode.resolved(from: "local"), .local)
+        XCTAssertEqual(StorageMode.resolved(from: "ownR2"), .ownR2)
+        XCTAssertEqual(StorageMode.resolved(from: "managed"), .managed)
 
         XCTAssertTrue(StorageMode.local.isReadyForRecording(
             managedSignedIn: false,
@@ -296,11 +385,13 @@ final class OnboardingLaunchTests: XCTestCase {
         defaults.set(StorageMode.local.rawValue, forKey: "StorageMode")
         GoogleCalendarConnectPrompt.decline(in: defaults)
         OpenRecOnboarding.persistWizardStep(.permissions, defaults: defaults)
+        XCTAssertTrue(defaults.bool(forKey: OpenRecOnboarding.screenPermissionRelaunchKey))
 
         OpenRecOnboarding.markComplete(defaults: defaults)
 
         XCTAssertTrue(defaults.bool(forKey: OpenRecOnboarding.completionKey))
         XCTAssertNil(defaults.string(forKey: OpenRecOnboarding.stepKey))
+        XCTAssertFalse(defaults.bool(forKey: OpenRecOnboarding.screenPermissionRelaunchKey))
         XCTAssertNil(OpenRecOnboarding.persistedWizardStep(defaults: defaults))
         XCTAssertEqual(
             defaults.string(forKey: TranscriptionProvider.defaultsKey),
@@ -322,6 +413,7 @@ final class OnboardingLaunchTests: XCTestCase {
         let input = OnboardingLaunchInput(
             markedComplete: false,
             persistedStep: OpenRecOnboarding.persistedWizardStep(defaults: defaults),
+            pendingScreenPermissionRelaunch: false,
             microphone: .notDetermined,
             screen: .denied,
             transcription: credentials(provider: .assemblyAI, assemblyKey: "", assemblyVerified: false),
@@ -348,6 +440,7 @@ final class OnboardingLaunchTests: XCTestCase {
         OnboardingLaunchInput(
             markedComplete: false,
             persistedStep: nil,
+            pendingScreenPermissionRelaunch: false,
             microphone: .allowed,
             screen: .allowed,
             transcription: credentials(
@@ -370,6 +463,7 @@ final class OnboardingLaunchTests: XCTestCase {
         OnboardingLaunchInput(
             markedComplete: false,
             persistedStep: nil,
+            pendingScreenPermissionRelaunch: false,
             microphone: .allowed,
             screen: .allowed,
             transcription: credentials(
