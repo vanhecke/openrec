@@ -70,7 +70,7 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
         let participants: [String]
     }
     @Published var mode: StorageMode {
-        didSet { UserDefaults.standard.set(mode.rawValue, forKey: "StorageMode") }
+        didSet { UserDefaults.standard.set(mode.rawValue, forKey: StorageMode.defaultsKey) }
     }
     @Published var managedEmail = UserDefaults.standard.string(forKey: "ManagedEmail")
     @Published var isSigningIn = false
@@ -225,8 +225,10 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
     private var authSession: ASWebAuthenticationSession?
 
     override init() {
-        let saved = UserDefaults.standard.string(forKey: "StorageMode")
-        mode = StorageMode(rawValue: saved ?? "") ?? .managed
+        // Resolve only. didSet is what persists a choice, and it does not run
+        // for this initial assignment, so an unset install stays unset.
+        let saved = UserDefaults.standard.string(forKey: StorageMode.defaultsKey)
+        mode = StorageMode.resolved(from: saved)
         super.init()
         removeLegacyRemoteMediaCacheIfNeeded()
         libraryMeetings = loadLocalMeetingRecords()
