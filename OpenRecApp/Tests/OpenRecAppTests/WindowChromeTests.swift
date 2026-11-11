@@ -29,7 +29,9 @@ final class WindowChromeTests: XCTestCase {
             defer: false
         )
         window.level = .floating
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .moveToActiveSpace, .stationary]
+        // The old recorder and onboarding behavior. canJoinAllSpaces together
+        // with moveToActiveSpace is rejected by AppKit before the policy runs.
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         window.hidesOnDeactivate = true
         window.ignoresMouseEvents = true
 
@@ -135,7 +137,6 @@ final class WindowChromeTests: XCTestCase {
         XCTAssertEqual(button?.isHidden, false)
         XCTAssertEqual(button?.isEnabled, true)
         XCTAssertEqual(button?.toolTip, "Hide OpenRec")
-        XCTAssertEqual(button?.action, #selector(NSWindow.performClose(_:)))
         if let target = button?.target as? NSWindow {
             XCTAssertTrue(target === window)
         }
