@@ -202,7 +202,7 @@ final class RecorderManager: ObservableObject {
     private var lastArtifacts: LegacyRecordingArtifacts?
     private var pendingMeetingID: UUID?
     private var pendingPreferences = CallPreferences()
-    private var pendingStorageMode: StorageMode = .managed
+    private var pendingStorageMode: StorageMode = StorageMode.resolved(from: nil)
     private var pendingStorageContext: CloudStorageContext?
     private var pendingDuration = 0
     private var pendingStartedAt: Date?
