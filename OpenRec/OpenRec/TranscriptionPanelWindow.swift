@@ -23,7 +23,6 @@ final class TranscriptionPanelWindow {
             backing: .buffered,
             defer: false
         )
-        panel.level = .floating
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
@@ -31,7 +30,7 @@ final class TranscriptionPanelWindow {
         panel.titlebarAppearsTransparent = true
         panel.isMovableByWindowBackground = true
         panel.isReleasedWhenClosed = false
-        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        WindowChrome.apply(.ordinary, to: panel)
         panel.appearance = NSAppearance(named: .darkAqua)
         panel.sharingType = .readOnly
 
