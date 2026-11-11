@@ -6,6 +6,8 @@ import CoreGraphics
 enum OpenRecOnboarding {
     static let completionKey = "OpenRecOnboardingCompletedV1"
     static let stepKey = "OpenRecOnboardingStepV1"
+    /// Set only while unfinished setup is on the screen-permission step.
+    static let screenPermissionRelaunchKey = "OpenRecOnboardingScreenPermissionRelaunchV1"
     static let assemblyKeychainAccount = "assemblyai-api-key"
     static let managedSessionKeychainAccount = "managed-session-token"
     static let r2AccessKeyIDAccount = "r2-access-key-id"
@@ -35,6 +37,7 @@ enum OpenRecOnboarding {
         return OnboardingLaunchInput(
             markedComplete: readiness.markedComplete,
             persistedStep: persistedWizardStep(defaults: defaults),
+            pendingScreenPermissionRelaunch: defaults.bool(forKey: screenPermissionRelaunchKey),
             microphone: microphonePermission(),
             screen: screenPermission(),
             transcription: readiness.transcription,
@@ -67,9 +70,9 @@ enum OpenRecOnboarding {
         )
     }
 
-    /// Readiness of the mode already stored. Does not change that selection.
+    /// Readiness of the mode `CloudStorageManager` already uses. Does not write a selection.
     static func storageConfiguration(defaults: UserDefaults = .standard) -> OnboardingStorageConfiguration {
-        let mode = StorageMode.resolvedStoredSelection(defaults.string(forKey: "StorageMode"))
+        let mode = StorageMode.resolved(from: defaults.string(forKey: StorageMode.defaultsKey))
         let ready = mode.isReadyForRecording(
             managedSignedIn: !KeychainStore.string(for: managedSessionKeychainAccount).isEmpty,
             r2AccountID: defaults.string(forKey: "R2AccountID") ?? "",
@@ -109,11 +112,23 @@ enum OpenRecOnboarding {
 
     static func persistWizardStep(_ step: OnboardingStep, defaults: UserDefaults = .standard) {
         defaults.set(step.persistenceID, forKey: stepKey)
+        switch step {
+        case .permissions:
+            // Quit & Reopen can kill the process from this step.
+            defaults.set(true, forKey: screenPermissionRelaunchKey)
+        case .ready:
+            // Keep the relaunch pending until Finish. Clearing it here would
+            // make the next readiness check skip the Ready page.
+            break
+        case .welcome, .assemblyAI, .meetingMemory, .storage, .calendar, .defaults, .webhook:
+            defaults.set(false, forKey: screenPermissionRelaunchKey)
+        }
     }
 
     static func markComplete(defaults: UserDefaults = .standard) {
         defaults.set(true, forKey: completionKey)
         defaults.removeObject(forKey: stepKey)
+        defaults.set(false, forKey: screenPermissionRelaunchKey)
     }
 }
 

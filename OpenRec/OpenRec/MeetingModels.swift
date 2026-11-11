@@ -38,12 +38,6 @@ enum StorageMode: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// Stored selection, including the unset fallback already used by
-    /// `CloudStorageManager`. Callers then judge readiness from that mode.
-    static func resolvedStoredSelection(_ stored: String?) -> StorageMode {
-        StorageMode(rawValue: stored ?? "") ?? .managed
-    }
-
     /// Whether the selected mode has the credentials it needs. Empty strings,
     /// including Keychain reads that failed closed, are not ready.
     func isReadyForRecording(
@@ -834,8 +828,12 @@ struct OnboardingStorageConfiguration: Equatable {
 
 struct OnboardingLaunchInput: Equatable {
     var markedComplete: Bool
-    /// Where the wizard last saved its place. Ignored once required setup is ready.
+    /// Where the wizard last saved its place. A saved step alone does not keep
+    /// a ready install in the wizard.
     var persistedStep: OnboardingStep?
+    /// Unfinished onboarding is on the screen-permission step, so the next
+    /// launch is the Quit & Reopen continuation rather than an ordinary start.
+    var pendingScreenPermissionRelaunch: Bool
     var microphone: OnboardingPermissionState
     var screen: OnboardingPermissionState
     var transcription: TranscriptionCredentials
@@ -861,17 +859,23 @@ enum OnboardingLaunchAction: Equatable {
 }
 
 enum OnboardingLaunch {
-    /// Skip only when the selected provider keys are readable and verified,
-    /// the selected storage mode can continue, and microphone plus screen
-    /// recording are allowed. A saved completion flag or step is not enough,
-    /// and a missing flag does not block a launch that already meets those
-    /// checks. Calendar, call defaults, and webhooks stay optional.
+    /// A ready install skips, even when the old completion flag is missing and
+    /// even when a step was saved. The exception is an unfinished screen-permission
+    /// relaunch: once microphone, screen recording, and the selected provider
+    /// and storage are ready, that launch opens the final Ready step. Calendar,
+    /// call defaults, and webhooks stay optional.
     static func decide(_ input: OnboardingLaunchInput) -> OnboardingLaunchAction {
         if input.requiredConfigurationReady {
+            if input.pendingScreenPermissionRelaunch && !input.markedComplete {
+                return .wizard(.ready)
+            }
             return .skip
         }
 
         let blocking = firstUnsatisfiedRequiredStep(input)
+        if input.pendingScreenPermissionRelaunch, blocking == .permissions {
+            return .wizard(.permissions)
+        }
         if let persisted = input.persistedStep {
             // A saved later step must not skip a required step that no longer
             // holds, and the ready page is not itself evidence of readiness.
