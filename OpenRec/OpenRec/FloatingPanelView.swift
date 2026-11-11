@@ -66,6 +66,10 @@ struct FloatingPanelView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
+        // fullSizeContentView + a hidden titlebar is a top safe-area inset.
+        // Without this the rounded card drops below the native close button,
+        // which then draws in the clear margin above the corner.
+        .ignoresSafeArea()
         .onAppear {
             scheduleSavedConfirmationDismissal(for: recorderManager.savedConfirmationState)
         }
@@ -170,9 +174,9 @@ private struct HeaderView: View {
             .foregroundColor(.white.opacity(hoveringQuit ? 1 : 0.66))
             .onHover { hoveringQuit = $0 }
         }
-        // The close button sits in the transparent titlebar, over the leading
-        // edge of this row. Inset the title so it clears that one control.
-        .padding(.leading, 36)
+        // The native close button sits in the transparent titlebar, over the
+        // leading edge of this row. Inset the title so it clears that control.
+        .padding(.leading, CloseButtonPlacement.headerLeadingClearance)
         .padding(.trailing, 12)
         .padding(.vertical, 8)
     }

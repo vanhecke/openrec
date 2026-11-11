@@ -17,6 +17,8 @@ final class CallDetectionWindow {
             backing: .buffered,
             defer: false
         )
+        // Not an ordinary window and not the recording border: a transient
+        // "call detected" toast that has to stay visible over the call.
         panel.level = .floating
         panel.isOpaque = false
         panel.backgroundColor = .clear

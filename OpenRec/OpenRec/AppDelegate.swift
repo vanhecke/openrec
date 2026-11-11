@@ -249,7 +249,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if window.isMiniaturized {
             window.deminiaturize(nil)
         }
-        configureTrafficLights(for: window)
+        WindowChrome.placeRecorderCloseButton(on: window)
         recorderManager.refreshMeetingNameSuggestion()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -285,31 +285,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupControlWindow() {
         let size = NSSize(width: mainWidth, height: expandedHeight)
-        let rect = NSRect(origin: .zero, size: size)
-        let window = NSWindow(
-            contentRect: rect,
-            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "OpenRec"
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
-        window.isReleasedWhenClosed = false
-        window.hidesOnDeactivate = false
-        window.level = .floating
-        window.backgroundColor = .clear
-        window.isOpaque = false
-        window.hasShadow = true
-        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-
-        // Keep the recorder visible to normal macOS screenshots. The app's
-        // own ScreenCaptureKit stream excludes OpenRec windows explicitly, so
-        // this does not burn the controls into call recordings.
-        window.sharingType = .readOnly
-
-        window.contentView = NSHostingView(
+        let window = WindowChrome.makeRecorderWindow(
+            size: size,
             rootView: FloatingPanelView(
                 recorderManager: recorderManager,
                 windowState: windowState,
@@ -324,7 +301,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         controlWindow = window
         window.delegate = self
-        configureTrafficLights(for: window)
         window.center()
     }
 
@@ -441,7 +417,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.isReleasedWhenClosed = false
         window.backgroundColor = NSColor(calibratedWhite: 0.1, alpha: 1)
         window.minSize = NSSize(width: 860, height: 580)
-        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        WindowChrome.apply(.ordinary, to: window)
         // Meeting details should remain available in screenshots for sharing
         // and support. Secure credentials only live in SecureFields elsewhere.
         window.sharingType = .readOnly
@@ -479,7 +455,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.isReleasedWhenClosed = false
         window.backgroundColor = NSColor(calibratedWhite: 0.1, alpha: 1)
         window.minSize = NSSize(width: 720, height: 520)
-        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        WindowChrome.apply(.ordinary, to: window)
         window.sharingType = .readOnly
         window.contentView = NSHostingView(rootView: OpenRecSettingsView(recorderManager: recorderManager))
         window.center()
@@ -599,16 +575,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         showSettingsWindow()
     }
 
-    /// Close stays visible so hiding the recorder into the menu bar is a normal
-    /// window action. Miniaturize and zoom stay hidden on this compact panel.
-    private func configureTrafficLights(for window: NSWindow) {
-        let closeButton = window.standardWindowButton(.closeButton)
-        closeButton?.isHidden = false
-        closeButton?.toolTip = "Hide OpenRec"
-        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        window.standardWindowButton(.zoomButton)?.isHidden = true
-    }
-
     private func checkForUpdatesOnLaunch() {
         guard let currentVersion = Bundle.main.shortVersionString else { return }
 
@@ -643,14 +609,17 @@ extension AppDelegate: NSMenuDelegate {
 
 extension AppDelegate: NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard sender === controlWindow else { return true }
-        sender.orderOut(nil)
-        return false
+        WindowChrome.recorderShouldClose(sender, recorder: controlWindow)
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
         guard let window = notification.object as? NSWindow, window === controlWindow else { return }
-        configureTrafficLights(for: window)
+        WindowChrome.placeRecorderCloseButton(on: window)
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === controlWindow else { return }
+        WindowChrome.placeRecorderCloseButton(on: window)
     }
 }
 

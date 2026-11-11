@@ -22,13 +22,11 @@ final class RecordingOverlayWindow {
             defer: false,
             screen: screen
         )
-        overlay.level = .statusBar
         overlay.backgroundColor = .clear
         overlay.isOpaque = false
         overlay.hasShadow = false
-        overlay.ignoresMouseEvents = true
-        overlay.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         overlay.sharingType = .readOnly
+        WindowChrome.apply(.recordingOverlay, to: overlay)
 
         let view = RecordingOverlayView(
             frame: overlay.contentView?.bounds ?? screen.frame,
