@@ -8,7 +8,7 @@ final class MeetingSearchIndexTests: XCTestCase {
         XCTAssertEqual(terms, ["cafe", "resume", "dont", "naive"])
     }
 
-    func testSearchIsCaseAndDiacriticInsensitive() {
+    func testSearchIsCaseAndDiacriticInsensitive() throws {
         let index = MeetingSearchIndex()
         let id = UUID()
         index.upsert(makeMeeting(
@@ -94,7 +94,7 @@ final class MeetingSearchIndexTests: XCTestCase {
         XCTAssertEqual(hits.map(\.matchesTitle), [true, true, false, false])
     }
 
-    func testSnippetUsesTheFirstMatchAndHighlightsEveryTermInTheWindow() {
+    func testSnippetUsesTheFirstMatchAndHighlightsEveryTermInTheWindow() throws {
         let index = MeetingSearchIndex()
         let id = UUID()
         let filler = String(repeating: "xxxx ", count: 40)
@@ -118,7 +118,7 @@ final class MeetingSearchIndexTests: XCTestCase {
         XCTAssertFalse(hit.snippet.text.contains("Nothing about money"))
     }
 
-    func testSearchCoversSummaryDecisionsNextStepsNamesTranscriptAndNotes() {
+    func testSearchCoversSummaryDecisionsNextStepsNamesTranscriptAndNotes() throws {
         let index = MeetingSearchIndex()
         let id = UUID()
         index.upsert(makeMeeting(
