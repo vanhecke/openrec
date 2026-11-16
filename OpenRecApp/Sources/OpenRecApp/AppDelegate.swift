@@ -16,7 +16,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let recordingsNavigation = RecordingLibraryNavigation()
     private let callDetector = CallDetectionManager()
     private let callDetectionWindow = CallDetectionWindow()
+    private let callEndAutoStop = CallEndAutoStopMonitor()
     private let windowState = WindowState()
+    /// Set only when Record is chosen from the call prompt, and consumed once recording actually starts.
+    /// A manual recording leaves this nil, so auto-stop can use silence only.
+    private var trackedCallAppForAutoStop: String?
     private let mainWidth: CGFloat = 240
     private let transcriptWidth: CGFloat = 281
     // Keep the idle panel compact: sized so the error state still fits while
@@ -26,6 +30,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let recordingHeight: CGFloat = 84
     private let recordingExpandedHeight: CGFloat = 320
     private let recordingNotesPanelHeight: CGFloat = 168
+    private let callEndCountdownHeight: CGFloat = 96
     private let collapsedHeight: CGFloat = 86
     private var pendingTerminate = false
     private var cancellables = Set<AnyCancellable>()
@@ -41,6 +46,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         recorderManager = RecorderManager()
+        callEndAutoStop.currentLevels = { [weak self] in
+            guard let self else { return (0, 0) }
+            return (system: self.recorderManager.systemLevel, mic: self.recorderManager.micLevel)
+        }
+        callEndAutoStop.callAppStillInCall = { [weak self] appName in
+            guard let self else { return true }
+            return await self.callDetector.isCallActive(appName: appName)
+        }
+        callEndAutoStop.onRequestStop = { [weak self] in
+            self?.recorderManager.stopRecording()
+        }
 #if canImport(Sparkle)
         recorderManager.onInstallReadyUpdate = { [weak self] in
             self?.updaterController.checkForUpdates(nil)
@@ -57,6 +73,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recorderManager.onRecordingStateChange = { [weak self] isRecording in
             DispatchQueue.main.async {
                 guard let self else { return }
+                if isRecording {
+                    let trackedApp = self.trackedCallAppForAutoStop
+                    self.trackedCallAppForAutoStop = nil
+                    self.callEndAutoStop.recordingDidStart(
+                        trackedCallAppName: trackedApp,
+                        enabled: self.recorderManager.autoStopWhenCallEnds
+                    )
+                } else {
+                    self.trackedCallAppForAutoStop = nil
+                    self.callEndAutoStop.recordingDidStop()
+                }
                 self.updateStatusIcon(isRecording: isRecording)
                 if isRecording {
                     self.callDetectionWindow.hide()
@@ -116,6 +143,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        recorderManager.$autoStopWhenCallEnds
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                self?.callEndAutoStop.setEnabled(enabled)
+            }
+            .store(in: &cancellables)
+
+        callEndAutoStop.$countdownDeadline
+            .map { $0 != nil }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] showing in
+                guard let self else { return }
+                if showing {
+                    self.revealCallEndCountdown()
+                } else {
+                    CallEndAttentionNotification.withdraw()
+                }
+                let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                self.recalculateWindowSize(animated: !reduceMotion)
+            }
+            .store(in: &cancellables)
+
         recorderManager.$isStarting
             .removeDuplicates()
             .filter { $0 }
@@ -131,8 +183,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         windowState.onCollapseChange = { [weak self] _ in
-            // Collapse is user-initiated — skip debounce for instant response
-            self?.performResize(animated: true)
+            // Collapse is user-initiated — skip debounce for instant response.
+            // Reduce Motion also covers the countdown reveal, which uncollapses the HUD.
+            let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            self?.performResize(animated: !reduceMotion)
         }
 
         setupEditMenu()
@@ -153,8 +207,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.callDetectionWindow.show(call: enriched, onStart: { [weak self] in
                     guard let self else { return }
                     self.recorderManager.detectedCall = enriched
+                    self.trackedCallAppForAutoStop = enriched.appName
                     self.showControlWindow()
-                    Task { await self.recorderManager.startRecording() }
+                    Task { [weak self] in
+                        guard let self else { return }
+                        await self.recorderManager.startRecording()
+                        if !self.recorderManager.isRecording {
+                            self.trackedCallAppForAutoStop = nil
+                        }
+                    }
                 }, onDismiss: { [weak self] in
                     self?.callDetector.snooze()
                 })
@@ -179,6 +240,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         callDetector.stop()
+        callEndAutoStop.recordingDidStop()
     }
 
     func applicationShouldHandleReopen(
@@ -253,6 +315,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         showRecorderWindow()
     }
 
+    /// The countdown has to be reachable. A visible HUD just grows; a hidden one is ordered front.
+    private func revealCallEndCountdown() {
+        let window = controlWindow
+        let hidden = window == nil || window?.isVisible != true || window?.isMiniaturized == true
+        if windowState.isCollapsed {
+            windowState.isCollapsed = false
+        }
+        guard hidden else { return }
+        showRecorderWindow()
+        NSApp.requestUserAttention(.informationalRequest)
+        CallEndAttentionNotification.post()
+    }
+
     private func showRecorderWindow() {
         guard let window = controlWindow else { return }
         if window.isMiniaturized {
@@ -299,6 +374,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             rootView: FloatingPanelView(
                 recorderManager: recorderManager,
                 windowState: windowState,
+                callEndAutoStop: callEndAutoStop,
                 onOpenSettings: { [weak self] in
                     self?.showSettingsWindow()
                 },
@@ -502,17 +578,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             let showingRightPanel = !collapsed && recorderManager.transcriptionManager.showPanel
             let showingNotes = isRecording && !collapsed && recorderManager.recordingNotes.isOpen
+            let showingCountdown = isRecording && callEndAutoStop.countdownDeadline != nil
 
             var baseHeight: CGFloat
             if isRecording {
                 baseHeight = showingRightPanel ? recordingExpandedHeight : recordingHeight
                 if showingNotes { baseHeight += recordingNotesPanelHeight }
+                if showingCountdown { baseHeight += callEndCountdownHeight }
             } else {
                 // Room for the blue Update button when a new version is ready.
                 baseHeight = expandedHeight + (recorderManager.readyUpdate != nil ? 34 : 0)
             }
             let w = mainWidth + (showingRightPanel ? transcriptWidth : 0)
-            let h = collapsed ? collapsedHeight : baseHeight
+            let h = collapsed ? collapsedHeight + (showingCountdown ? callEndCountdownHeight : 0) : baseHeight
             return (w, h)
         }
 

@@ -701,6 +701,12 @@ struct OpenRecSettingsView: View {
                         detail: "Show a compact side prompt for Meet, Zoom, Teams, FaceTime, and Webex",
                         value: $recorderManager.callDetectionEnabled
                     )
+                    SettingsDivider()
+                    SettingsToggleRow(
+                        title: "Stop recording automatically when the call ends",
+                        detail: "A countdown on the recorder lets you keep going. Otherwise the recording stops and saves.",
+                        value: $recorderManager.autoStopWhenCallEnds
+                    )
                 }
             }
 

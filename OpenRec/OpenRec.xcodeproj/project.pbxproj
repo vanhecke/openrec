@@ -25,6 +25,7 @@
 		A1000053243B0001 /* TranscriptionPanelWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000043243B0001 /* TranscriptionPanelWindow.swift */; };
 		A1000054243B0001 /* TranscriptionPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000044243B0001 /* TranscriptionPanelView.swift */; };
 		A1000060243B0001 /* CallDetectionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000070243B0001 /* CallDetectionManager.swift */; };
+		A1000120243B000A /* CallEndAutoStop.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000121243B000A /* CallEndAutoStop.swift */; };
 		A1000061243B0001 /* CallDetectionWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000071243B0001 /* CallDetectionWindow.swift */; };
 		A1000062243B0001 /* CloudStorageManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000072243B0001 /* CloudStorageManager.swift */; };
 		A1000063243B0001 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000073243B0001 /* KeychainStore.swift */; };
@@ -75,6 +76,7 @@
 		A1000043243B0001 /* TranscriptionPanelWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionPanelWindow.swift; sourceTree = "<group>"; };
 		A1000044243B0001 /* TranscriptionPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionPanelView.swift; sourceTree = "<group>"; };
 		A1000070243B0001 /* CallDetectionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallDetectionManager.swift; sourceTree = "<group>"; };
+		A1000121243B000A /* CallEndAutoStop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallEndAutoStop.swift; sourceTree = "<group>"; };
 		A1000071243B0001 /* CallDetectionWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallDetectionWindow.swift; sourceTree = "<group>"; };
 		A1000072243B0001 /* CloudStorageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudStorageManager.swift; sourceTree = "<group>"; };
 		A1000073243B0001 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
@@ -153,6 +155,7 @@
 				A1000043243B0001 /* TranscriptionPanelWindow.swift */,
 				A1000044243B0001 /* TranscriptionPanelView.swift */,
 				A1000070243B0001 /* CallDetectionManager.swift */,
+				A1000121243B000A /* CallEndAutoStop.swift */,
 				A1000071243B0001 /* CallDetectionWindow.swift */,
 				A1000072243B0001 /* CloudStorageManager.swift */,
 				A100007B243B0001 /* MediaStreamingSession.swift */,
@@ -292,6 +295,7 @@
 				A1000053243B0001 /* TranscriptionPanelWindow.swift in Sources */,
 				A1000054243B0001 /* TranscriptionPanelView.swift in Sources */,
 				A1000060243B0001 /* CallDetectionManager.swift in Sources */,
+				A1000120243B000A /* CallEndAutoStop.swift in Sources */,
 				A1000061243B0001 /* CallDetectionWindow.swift in Sources */,
 				A1000062243B0001 /* CloudStorageManager.swift in Sources */,
 				A100006B243B0001 /* MediaStreamingSession.swift in Sources */,

@@ -146,6 +146,10 @@ final class RecorderManager: ObservableObject {
     @Published var callDetectionEnabled: Bool {
         didSet { UserDefaults.standard.set(callDetectionEnabled, forKey: "CallDetectionEnabled") }
     }
+    /// When on, a detected call ending — or a full minute of silence — counts down on the HUD, then stops and saves.
+    @Published var autoStopWhenCallEnds: Bool {
+        didSet { UserDefaults.standard.set(autoStopWhenCallEnds, forKey: "AutoStopWhenCallEnds") }
+    }
     @Published var microphoneDevices: [AVCaptureDevice] = []
     @Published var selectedMicrophoneID: String?
     @Published var callPreferences: CallPreferences {
@@ -234,6 +238,7 @@ final class RecorderManager: ObservableObject {
     init() {
         showRecordingBorder = UserDefaults.standard.object(forKey: showBorderKey) as? Bool ?? true
         callDetectionEnabled = UserDefaults.standard.object(forKey: "CallDetectionEnabled") as? Bool ?? true
+        autoStopWhenCallEnds = UserDefaults.standard.object(forKey: "AutoStopWhenCallEnds") as? Bool ?? true
         callPreferences = Self.loadPreferences()
         screenEncodeSettings = ScreenEncodeSettings.stored(in: .standard)
         if let last = lastClientNameDisplay { clientNameInput = last }
