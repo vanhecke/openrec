@@ -11,9 +11,14 @@ struct RecordingLibrarySelectionRequest: Equatable {
 @MainActor
 final class RecordingLibraryNavigation: ObservableObject {
     @Published private(set) var request: RecordingLibrarySelectionRequest?
+    @Published private(set) var focusSearchToken: UUID?
 
     func select(_ meetingID: UUID) {
         request = RecordingLibrarySelectionRequest(meetingID: meetingID)
+    }
+
+    func focusSearch() {
+        focusSearchToken = UUID()
     }
 }
 
@@ -131,6 +136,9 @@ struct RecordingLibraryView: View {
     @State private var localCalendarGranted = CalendarMeetingSuggester.accessGranted
     @State private var googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
     @State private var searchText = ""
+    @FocusState private var searchFieldFocused: Bool
+    @State private var pendingSearchFocus = false
+    @State private var handledSearchFocusToken: UUID?
     @State private var selectedID: UUID?
     @State private var detail: MeetingRecord?
     @State private var selectedTab: MeetingDetailTab = .summary
@@ -143,9 +151,6 @@ struct RecordingLibraryView: View {
     @State private var copied = false
     @State private var detailTask: Task<Void, Never>?
     @State private var mediaTask: Task<Void, Never>?
-    @State private var remoteSearchResults: [MeetingRecord] = []
-    @State private var isSearching = false
-    @State private var searchError: String?
     @State private var handledSelectionToken: UUID?
     @State private var deletingMeetingID: UUID?
 
@@ -157,27 +162,36 @@ struct RecordingLibraryView: View {
     private let accent = Color(red: 1, green: 0.25, blue: 0.28)
     private let calendarRefreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
-    private var visibleMeetings: [MeetingRecord] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return recorderManager.cloudStorage.libraryMeetings }
-        let localMatches = recorderManager.cloudStorage.libraryMeetings.filter { meeting in
-            [
-                meeting.title,
-                meeting.callTitle ?? "",
-                meeting.callApp ?? "",
-                meeting.insights.summary,
-                meeting.insights.aiNotes,
-                meeting.insights.participants.joined(separator: " "),
-                SpeakerNames.identifiedNames(transcript: meeting.transcript ?? "", mapping: meeting.speakerNames ?? [:]).joined(separator: " "),
-                meeting.transcript ?? "",
-            ].joined(separator: " ").localizedCaseInsensitiveContains(query)
+    private struct LibraryListEntry: Identifiable {
+        let meeting: MeetingRecord
+        let titleSnippet: MeetingSearchSnippet?
+        let bodySnippet: MeetingSearchSnippet?
+        var id: UUID { meeting.id }
+    }
+
+    private var trimmedSearch: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// An empty field is the normal recency list. A query is ranked by the
+    /// in-memory index, which is the same for every storage mode.
+    private var visibleMeetings: [LibraryListEntry] {
+        let meetings = recorderManager.cloudStorage.libraryMeetings
+        guard !trimmedSearch.isEmpty else {
+            return meetings.map { LibraryListEntry(meeting: $0, titleSnippet: nil, bodySnippet: nil) }
         }
-        guard recorderManager.cloudStorage.mode == .managed else { return localMatches }
-        var byID = Dictionary(uniqueKeysWithValues: localMatches.map { ($0.id, $0) })
-        for remote in remoteSearchResults {
-            byID[remote.id] = recorderManager.cloudStorage.libraryMeetings.first(where: { $0.id == remote.id }) ?? remote
+        let hits = recorderManager.cloudStorage.librarySearchResults(matching: trimmedSearch)
+        var byID: [UUID: MeetingRecord] = [:]
+        byID.reserveCapacity(meetings.count)
+        for meeting in meetings { byID[meeting.id] = meeting }
+        return hits.compactMap { hit in
+            guard let meeting = byID[hit.id] else { return nil }
+            if hit.snippetReplacesTitle {
+                return LibraryListEntry(meeting: meeting, titleSnippet: hit.snippet, bodySnippet: nil)
+            }
+            let snippet = hit.snippet.text.isEmpty ? nil : hit.snippet
+            return LibraryListEntry(meeting: meeting, titleSnippet: nil, bodySnippet: snippet)
         }
-        return byID.values.sorted { $0.startedAt > $1.startedAt }
     }
 
     var body: some View {
@@ -196,30 +210,18 @@ struct RecordingLibraryView: View {
         .ignoresSafeArea()
         .frame(minWidth: 860, minHeight: 580)
         .task {
+            focusSearchIfRequested()
             recorderManager.refreshUpcomingEvents()
             await recorderManager.cloudStorage.refreshLibrary()
             selectInitialMeeting()
         }
-        .task(id: searchText) {
-            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-            remoteSearchResults = []
-            searchError = nil
-            guard !query.isEmpty,
-                  recorderManager.cloudStorage.mode == .managed,
-                  recorderManager.cloudStorage.isManagedSignedIn else { return }
-            isSearching = true
-            defer { isSearching = false }
-            do {
-                try await Task.sleep(for: .milliseconds(250))
-                let results = try await recorderManager.cloudStorage.searchManagedMeetings(query: query)
-                guard !Task.isCancelled else { return }
-                remoteSearchResults = results
-            } catch is CancellationError {
-                return
-            } catch {
-                guard !Task.isCancelled else { return }
-                searchError = error.localizedDescription
-            }
+        .onChange(of: navigation.focusSearchToken) { _ in
+            focusSearchIfRequested()
+        }
+        .onChange(of: tab) { newTab in
+            guard newTab == .past, pendingSearchFocus else { return }
+            pendingSearchFocus = false
+            DispatchQueue.main.async { searchFieldFocused = true }
         }
         .onChange(of: navigation.request) { _ in
             if !applyPendingSelection() {
@@ -247,7 +249,7 @@ struct RecordingLibraryView: View {
         }
         .onChange(of: selectedID) { id in
             guard let id else { return }
-            guard let meeting = visibleMeetings.first(where: { $0.id == id })
+            guard let meeting = visibleMeetings.first(where: { $0.id == id })?.meeting
                     ?? recorderManager.cloudStorage.libraryMeetings.first(where: { $0.id == id }) else {
                 detail = nil
                 return
@@ -307,14 +309,6 @@ struct RecordingLibraryView: View {
 
             if tab == .past {
                 searchField
-                if let searchError {
-                    Label(searchError, systemImage: "magnifyingglass")
-                        .font(.system(size: 9.5, weight: .medium))
-                        .foregroundColor(Color.orange.opacity(0.88))
-                        .lineLimit(3)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 8)
-                }
                 if let error = recorderManager.cloudStorage.libraryError {
                     Label(error, systemImage: "icloud.slash")
                         .font(.system(size: 10, weight: .medium))
@@ -351,11 +345,7 @@ struct RecordingLibraryView: View {
                 Text("•")
                 Text(AppVersionPresentation.current)
                 Spacer()
-                Text(
-                    tab == .comingUp
-                        ? "\(recorderManager.upcomingEvents.count) upcoming"
-                        : "\(recorderManager.cloudStorage.libraryMeetings.count)"
-                )
+                Text(libraryCountLabel)
             }
             .font(.system(size: 10, weight: .medium))
             .foregroundColor(Color.white.opacity(0.4))
@@ -414,6 +404,15 @@ struct RecordingLibraryView: View {
         if newTab == .comingUp { recorderManager.refreshUpcomingEvents() }
     }
 
+    private var libraryCountLabel: String {
+        if tab == .comingUp {
+            return "\(recorderManager.upcomingEvents.count) upcoming"
+        }
+        let total = recorderManager.cloudStorage.libraryMeetings.count
+        guard !trimmedSearch.isEmpty else { return "\(total)" }
+        return "\(visibleMeetings.count) of \(total)"
+    }
+
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
@@ -427,7 +426,21 @@ struct RecordingLibraryView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
                 .foregroundColor(primary)
-            if isSearching { ProgressView().controlSize(.mini) }
+                .focused($searchFieldFocused)
+                .accessibilityLabel("Search meetings")
+            if !trimmedSearch.isEmpty {
+                Button {
+                    searchText = ""
+                    searchFieldFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+                .accessibilityLabel("Clear search")
+            }
         }
         .padding(.horizontal, 10)
         .frame(height: 32)
@@ -435,6 +448,7 @@ struct RecordingLibraryView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
+        .help("Search meetings (⌘F)")
     }
 
     @ViewBuilder
@@ -444,10 +458,10 @@ struct RecordingLibraryView: View {
                 Image(systemName: "rectangle.stack")
                     .font(.system(size: 24, weight: .medium))
                     .foregroundColor(Color.white.opacity(0.22))
-                Text(searchText.isEmpty ? "Your calls will appear here" : "No matching meetings")
+                Text(trimmedSearch.isEmpty ? "Your calls will appear here" : "No matching meetings")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(secondary)
-                if searchText.isEmpty {
+                if trimmedSearch.isEmpty {
                     Text("Record a call and OpenRec will keep its transcript, next steps, and selected recordings together.")
                         .font(.system(size: 10))
                         .foregroundColor(Color.white.opacity(0.38))
@@ -459,21 +473,23 @@ struct RecordingLibraryView: View {
             .padding(.top, 70)
         } else {
             LazyVStack(spacing: 4) {
-                ForEach(visibleMeetings) { meeting in
+                ForEach(visibleMeetings) { entry in
                     MeetingRow(
-                        meeting: meeting,
-                        selected: selectedID == meeting.id,
-                        accent: accent
+                        meeting: entry.meeting,
+                        selected: selectedID == entry.id,
+                        accent: accent,
+                        titleSnippet: entry.titleSnippet,
+                        bodySnippet: entry.bodySnippet
                     ) {
-                        selectMeeting(meeting, forceReload: true)
+                        selectMeeting(entry.meeting, forceReload: true)
                     }
                     .contextMenu {
                         Button(role: .destructive) {
-                            confirmAndDelete(meeting)
+                            confirmAndDelete(entry.meeting)
                         } label: {
                             Label("Delete Meeting…", systemImage: "trash")
                         }
-                        .disabled(meeting.saveStatus == .processing || deletingMeetingID != nil)
+                        .disabled(entry.meeting.saveStatus == .processing || deletingMeetingID != nil)
                     }
                 }
             }
@@ -1072,6 +1088,21 @@ struct RecordingLibraryView: View {
         }
     }
 
+    private func focusSearchIfRequested() {
+        guard let token = navigation.focusSearchToken, handledSearchFocusToken != token else { return }
+        handledSearchFocusToken = token
+        focusSearchField()
+    }
+
+    private func focusSearchField() {
+        if tab != .past {
+            pendingSearchFocus = true
+            switchTab(to: .past)
+        } else {
+            searchFieldFocused = true
+        }
+    }
+
     private func selectInitialMeeting() {
         if applyPendingSelection() { return }
         if let selectedID, visibleMeetings.contains(where: { $0.id == selectedID }) { return }
@@ -1088,8 +1119,6 @@ struct RecordingLibraryView: View {
         }
         handledSelectionToken = request.token
         searchText = ""
-        remoteSearchResults = []
-        searchError = nil
         switchTab(to: .past)
         selectMeeting(meeting, forceReload: true)
         return true
@@ -1490,6 +1519,8 @@ private struct MeetingRow: View {
     let meeting: MeetingRecord
     let selected: Bool
     let accent: Color
+    var titleSnippet: MeetingSearchSnippet? = nil
+    var bodySnippet: MeetingSearchSnippet? = nil
     let action: () -> Void
 
     var body: some View {
@@ -1500,10 +1531,21 @@ private struct MeetingRow: View {
                     .frame(width: 3, height: 34)
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
-                        Text(meeting.title)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(Color.white.opacity(selected ? 0.94 : 0.78))
-                            .lineLimit(1)
+                        if let titleSnippet {
+                            MeetingSearchSnippetText(
+                                snippet: titleSnippet,
+                                size: 12,
+                                weight: .semibold,
+                                color: Color.white.opacity(selected ? 0.94 : 0.78),
+                                matchColor: accent,
+                                lineLimit: 1
+                            )
+                        } else {
+                            Text(meeting.title)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color.white.opacity(selected ? 0.94 : 0.78))
+                                .lineLimit(1)
+                        }
                         Spacer(minLength: 4)
                         if meeting.saveStatus == .failed {
                             Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
@@ -1526,6 +1568,15 @@ private struct MeetingRow: View {
                     .font(.system(size: 9, weight: .medium))
                     .foregroundColor(Color.white.opacity(0.4))
                     .lineLimit(1)
+                    if let bodySnippet {
+                        MeetingSearchSnippetText(
+                            snippet: bodySnippet,
+                            size: 11,
+                            color: Color.white.opacity(0.55),
+                            matchColor: accent,
+                            lineLimit: 2
+                        )
+                    }
                 }
             }
             .padding(.horizontal, 8)

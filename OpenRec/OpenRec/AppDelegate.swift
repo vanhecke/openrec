@@ -387,6 +387,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         presentRecordingsLibrary(focusLastSaved: false)
     }
 
+    @objc private func focusMeetingSearch() {
+        presentRecordingsLibrary(focusLastSaved: false)
+        recordingsNavigation.focusSearch()
+    }
+
     private func presentRecordingsLibrary(focusLastSaved: Bool) {
         if focusLastSaved, let meetingID = recorderManager.lastSavedMeetingID {
             // A selection request carries a fresh token, so clicking “View meeting”
@@ -553,6 +558,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(.separator())
+        let find = editMenu.addItem(withTitle: "Find…", action: #selector(focusMeetingSearch), keyEquivalent: "f")
+        find.target = self
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
