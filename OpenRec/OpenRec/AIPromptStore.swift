@@ -124,9 +124,10 @@ enum AIPromptStore {
     static func meetingMemoryUser(
         transcript: String,
         callTitle: String?,
+        userNotes: String? = nil,
         defaults: UserDefaults = .standard
     ) -> String {
-        render(
+        let rendered = render(
             .meetingMemoryUser,
             values: [
                 .callTitle: callTitle ?? "none",
@@ -134,6 +135,7 @@ enum AIPromptStore {
             ],
             defaults: defaults
         )
+        return RecordingNotesPrompt.append(userNotes, to: rendered)
     }
 
     static func speakerIdentificationSystem(defaults: UserDefaults = .standard) -> String {

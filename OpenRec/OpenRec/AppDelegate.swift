@@ -25,6 +25,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let expandedHeight: CGFloat = 320
     private let recordingHeight: CGFloat = 84
     private let recordingExpandedHeight: CGFloat = 320
+    private let recordingNotesPanelHeight: CGFloat = 168
     private let collapsedHeight: CGFloat = 86
     private var pendingTerminate = false
     private var cancellables = Set<AnyCancellable>()
@@ -90,6 +91,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Observe showPanel changes — user-initiated, skip debounce
         recorderManager.transcriptionManager.$showPanel
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.performResize(animated: true)
+            }
+            .store(in: &cancellables)
+
+        recorderManager.recordingNotes.$isOpen
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -492,10 +501,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let isRecording = recorderManager.isRecording
 
             let showingRightPanel = !collapsed && recorderManager.transcriptionManager.showPanel
+            let showingNotes = isRecording && !collapsed && recorderManager.recordingNotes.isOpen
 
-            let baseHeight: CGFloat
+            var baseHeight: CGFloat
             if isRecording {
                 baseHeight = showingRightPanel ? recordingExpandedHeight : recordingHeight
+                if showingNotes { baseHeight += recordingNotesPanelHeight }
             } else {
                 // Room for the blue Update button when a new version is ready.
                 baseHeight = expandedHeight + (recorderManager.readyUpdate != nil ? 34 : 0)

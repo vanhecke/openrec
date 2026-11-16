@@ -275,7 +275,11 @@ final class TranscriptionManager: ObservableObject {
         }
     }
 
-    func analyze(callTitle: String?, speakerNames: [String: String]? = nil) async throws -> MeetingInsights {
+    func analyze(
+        callTitle: String?,
+        speakerNames: [String: String]? = nil,
+        userNotes: String? = nil
+    ) async throws -> MeetingInsights {
         let transcript = fullTranscriptText()
         guard !transcript.isEmpty else { return MeetingInsights() }
         let mapping = speakerNames ?? self.speakerNames
@@ -286,7 +290,8 @@ final class TranscriptionManager: ObservableObject {
             let value = try await generateInsights(
                 transcript: transcript,
                 callTitle: callTitle,
-                speakerNames: mapping
+                speakerNames: mapping,
+                userNotes: userNotes
             )
             insights = value
             return value
@@ -312,7 +317,8 @@ final class TranscriptionManager: ObservableObject {
     func generateInsights(
         transcript: String,
         callTitle: String?,
-        speakerNames: [String: String] = [:]
+        speakerNames: [String: String] = [:],
+        userNotes: String? = nil
     ) async throws -> MeetingInsights {
         let credentials = meetingMemoryCredentials
         guard credentials.hasSelectedKey else {
@@ -323,7 +329,8 @@ final class TranscriptionManager: ObservableObject {
             provider: credentials.provider,
             apiKey: credentials.selectedKey,
             transcript: named,
-            callTitle: callTitle
+            callTitle: callTitle,
+            userNotes: userNotes
         )
     }
 

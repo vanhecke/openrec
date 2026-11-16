@@ -13,6 +13,7 @@ import Foundation
 ///     transcript.txt
 ///     summary.txt
 ///     notes.txt
+///     my-notes.txt
 ///     participants.txt
 ///     next-steps.txt
 ///     decisions.txt
@@ -27,6 +28,8 @@ enum LocalMeetingTextFiles {
     static let transcriptFileName = "transcript.txt"
     static let summaryFileName = "summary.txt"
     static let notesFileName = "notes.txt"
+    /// Timestamped notes the user typed. Kept beside the transcript, separate from AI `notes.txt`.
+    static let myNotesFileName = "my-notes.txt"
     static let participantsFileName = "participants.txt"
     static let nextStepsFileName = "next-steps.txt"
     static let decisionsFileName = "decisions.txt"
@@ -128,6 +131,7 @@ enum LocalMeetingTextFiles {
             RenderedFile(name: transcriptFileName, text: MeetingClipboardText.transcript(for: meeting)),
             RenderedFile(name: summaryFileName, text: MeetingClipboardText.summary(for: meeting)),
             RenderedFile(name: notesFileName, text: MeetingClipboardText.aiNotes(for: meeting)),
+            RenderedFile(name: myNotesFileName, text: MeetingClipboardText.userNotes(for: meeting)),
             RenderedFile(name: participantsFileName, text: MeetingClipboardText.participants(for: meeting)),
             RenderedFile(name: nextStepsFileName, text: MeetingClipboardText.nextSteps(for: meeting)),
             RenderedFile(name: decisionsFileName, text: MeetingClipboardText.decisions(for: meeting)),
@@ -153,6 +157,7 @@ enum LocalMeetingTextFiles {
             transcriptFileName,
             summaryFileName,
             notesFileName,
+            myNotesFileName,
             participantsFileName,
             nextStepsFileName,
             decisionsFileName,
