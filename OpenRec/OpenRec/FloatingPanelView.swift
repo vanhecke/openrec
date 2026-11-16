@@ -4,6 +4,7 @@ import AppKit
 struct FloatingPanelView: View {
     @ObservedObject var recorderManager: RecorderManager
     @ObservedObject var windowState: WindowState
+    @ObservedObject var callEndAutoStop: CallEndAutoStopMonitor
     let onOpenSettings: () -> Void
     let onOpenLibrary: (_ focusLastSaved: Bool) -> Void
     @State private var savedConfirmationDismissal: DispatchWorkItem?
@@ -36,7 +37,9 @@ struct FloatingPanelView: View {
 
                     if windowState.isCollapsed {
                         CompactControlsView(recorderManager: recorderManager, onOpenLibrary: onOpenLibrary)
+                        callEndCountdownCard
                     } else if recorderManager.isRecording {
+                        callEndCountdownCard
                         if recorderManager.recordingNotes.isOpen {
                             VStack(spacing: 0) {
                                 RecordingControlsView(recorderManager: recorderManager)
@@ -91,6 +94,17 @@ struct FloatingPanelView: View {
             if isOpen && windowState.isCollapsed {
                 windowState.isCollapsed = false
             }
+        }
+    }
+
+    @ViewBuilder
+    private var callEndCountdownCard: some View {
+        if recorderManager.isRecording, let deadline = callEndAutoStop.countdownDeadline {
+            CallEndCountdownCard(
+                deadline: deadline,
+                onKeep: { callEndAutoStop.keepRecording() },
+                onStop: { recorderManager.stopRecording() }
+            )
         }
     }
 
@@ -640,6 +654,80 @@ extension View {
         } else {
             self
         }
+    }
+}
+
+private struct CallEndCountdownCard: View {
+    let deadline: Date
+    let onKeep: () -> Void
+    let onStop: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(
+            .periodic(
+                from: deadline.addingTimeInterval(-CallEndAutoStop.Thresholds.countdownDuration),
+                by: reduceMotion ? 1.0 : 0.25
+            )
+        ) { context in
+            let total = CallEndAutoStop.Thresholds.countdownDuration
+            let remaining = max(0, deadline.timeIntervalSince(context.date))
+            let fraction = CGFloat(total > 0 ? min(1.0, remaining / total) : 0.0)
+            let seconds = Int(ceil(remaining))
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Call ended, stopping in \(seconds)s")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .accessibilityLabel("Call ended, stopping in \(seconds) seconds")
+
+                if !reduceMotion {
+                    Capsule()
+                        .fill(Color.white.opacity(0.08))
+                        .frame(height: 3)
+                        .overlay(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.red.opacity(0.9))
+                                .scaleEffect(x: max(fraction, 0), y: 1, anchor: .leading)
+                        }
+                        .clipShape(Capsule())
+                        .animation(.linear(duration: 0.25), value: fraction)
+                        .accessibilityHidden(true)
+                }
+
+                HStack(spacing: 6) {
+                    Button("Keep Recording", action: onKeep)
+                        .buttonStyle(CallEndCountdownButtonStyle(prominent: true))
+                    Button("Stop Now", action: onStop)
+                        .buttonStyle(CallEndCountdownButtonStyle(prominent: false))
+                }
+            }
+            .padding(10)
+            .background(Color.white.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
+        }
+    }
+}
+
+private struct CallEndCountdownButtonStyle: ButtonStyle {
+    let prominent: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundColor(prominent ? .white : Color.white.opacity(0.78))
+            .frame(maxWidth: .infinity)
+            .frame(height: 26)
+            .background(prominent ? Color.red.opacity(0.92) : Color.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .opacity(configuration.isPressed ? 0.82 : 1)
     }
 }
 
