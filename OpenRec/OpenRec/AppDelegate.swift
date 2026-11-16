@@ -482,7 +482,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // A selection request carries a fresh token, so clicking “View meeting”
             // selects the saved call even when the library window already exists
             // and the user previously browsed to a different meeting. Plain opens
-            // skip this so the window can lead with Coming up.
+            // skip this so the window can lead with Home.
             recordingsNavigation.select(meetingID)
         }
         if let window = recordingsWindow {

@@ -114,20 +114,15 @@ private enum MeetingDetailTab: String, CaseIterable, Identifiable {
 }
 
 private enum LibraryTab: Int, CaseIterable {
-    case comingUp
+    case home
     case past
 
     var label: String {
         switch self {
-        case .comingUp: return "Coming up"
+        case .home: return "Home"
         case .past: return "Past"
         }
     }
-}
-
-private struct UpcomingDayGroup {
-    let day: Date
-    let events: [UpcomingCalendarEvent]
 }
 
 struct RecordingLibraryView: View {
@@ -135,11 +130,8 @@ struct RecordingLibraryView: View {
     @ObservedObject var navigation: RecordingLibraryNavigation
     var onOpenSettings: (() -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    // Coming up is the main view; opening a specific meeting switches to Past.
-    @State private var tab: LibraryTab = .comingUp
-    @State private var tabMovesForward = true
-    @State private var adoptedEventID: String?
-    @State private var localCalendarGranted = CalendarMeetingSuggester.accessGranted
+    // Home is the landing view. Opening a meeting or Find switches to Past.
+    @State private var tab: LibraryTab = .home
     @State private var googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
     @State private var searchText = ""
     @FocusState private var searchFieldFocused: Bool
@@ -204,12 +196,16 @@ struct RecordingLibraryView: View {
 
     var body: some View {
         ZStack {
-            background.ignoresSafeArea()
-            HStack(spacing: 0) {
-                librarySidebar
-                    .frame(width: 300)
-                Color.white.opacity(0.08).frame(width: 1)
-                detailPane
+            if tab == .home {
+                homeScreen
+            } else {
+                background.ignoresSafeArea()
+                HStack(spacing: 0) {
+                    librarySidebar
+                        .frame(width: 300)
+                    Color.white.opacity(0.08).frame(width: 1)
+                    detailPane
+                }
             }
         }
         // The titlebar is hidden and the window uses fullSizeContentView, so
@@ -241,13 +237,13 @@ struct RecordingLibraryView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
-            if tab == .comingUp { recorderManager.refreshUpcomingEvents() }
+            if tab == .home { recorderManager.refreshUpcomingEvents() }
         }
         .onChange(of: recorderManager.cloudStorage.calendarEmails) { _ in
             googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
         }
         .onReceive(calendarRefreshTimer) { _ in
-            if tab == .comingUp { recorderManager.refreshUpcomingEvents() }
+            if tab == .home { recorderManager.refreshUpcomingEvents() }
         }
         .onChange(of: recorderManager.cloudStorage.libraryMeetings) { _ in
             selectInitialMeeting()
@@ -315,37 +311,21 @@ struct RecordingLibraryView: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
 
-            if tab == .past {
-                searchField
-                if let error = recorderManager.cloudStorage.libraryError {
-                    Label(error, systemImage: "icloud.slash")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(Color.orange.opacity(0.9))
-                        .lineLimit(4)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 10)
-                }
+            searchField
+            if let error = recorderManager.cloudStorage.libraryError {
+                Label(error, systemImage: "icloud.slash")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(Color.orange.opacity(0.9))
+                    .lineLimit(4)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
             }
 
-            // One persistent list; the tabs only filter which half of the
-            // timeline is visible (future ascending vs. past descending).
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if tab == .comingUp {
-                        comingUpContent
-                            .transition(tabTransition)
-                    } else {
-                        pastListContent
-                            .transition(tabTransition)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                pastListContent
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .clipped()
-
-            if tab == .comingUp, showsCalendarSourcesBar {
-                calendarSourcesBar
-            }
 
             HStack(spacing: 6) {
                 Image(systemName: recorderManager.cloudStorage.mode == .managed ? "icloud" : "shippingbox")
@@ -390,32 +370,43 @@ struct RecordingLibraryView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private var tabTransition: AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        let insertion = AnyTransition.opacity
-            .combined(with: .offset(x: tabMovesForward ? 30 : -30))
-        let removal = AnyTransition.opacity
-            .combined(with: .offset(x: tabMovesForward ? -18 : 18))
-        return .asymmetric(insertion: insertion, removal: removal)
+    private var homeScreen: some View {
+        HomeView(
+            snapshot: HomeViewModel.snapshot(
+                from: recorderManager,
+                declined: googleCalendarConnectDeclined
+            ),
+            settingsEnabled: onOpenSettings != nil,
+            settingsDisabled: recorderManager.isRecording || recorderManager.isProcessing,
+            isRefreshing: recorderManager.cloudStorage.isLoadingLibrary,
+            recordDisabled: recorderManager.isRecording || recorderManager.isProcessing || recorderManager.isStarting,
+            recordingStatus: recorderManager.lastErrorMessage,
+            onShowPast: { switchTab(to: .past) },
+            onOpenSettings: { onOpenSettings?() },
+            onRefresh: {
+                Task { await recorderManager.cloudStorage.refreshLibrary() }
+                recorderManager.refreshUpcomingEvents()
+            },
+            onOpenMeeting: { navigation.select($0) },
+            onJoinAndRecord: { HomeViewModel.joinAndRecord($0, recorder: recorderManager) },
+            onRecord: { HomeViewModel.record($0, recorder: recorderManager) }
+        )
+        .onAppear {
+            googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
+            recorderManager.refreshUpcomingEvents()
+            Task { await recorderManager.cloudStorage.refreshCalendarConnectionStatus() }
+        }
     }
 
     private func switchTab(to newTab: LibraryTab) {
         guard newTab != tab else { return }
-        tabMovesForward = newTab.rawValue > tab.rawValue
-        withAnimation(
-            reduceMotion
-                ? .easeOut(duration: 0.12)
-                : .timingCurve(0.23, 1, 0.32, 1, duration: 0.26)
-        ) {
+        withAnimation(reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.2)) {
             tab = newTab
         }
-        if newTab == .comingUp { recorderManager.refreshUpcomingEvents() }
+        if newTab == .home { recorderManager.refreshUpcomingEvents() }
     }
 
     private var libraryCountLabel: String {
-        if tab == .comingUp {
-            return "\(recorderManager.upcomingEvents.count) upcoming"
-        }
         let total = recorderManager.cloudStorage.libraryMeetings.count
         guard !trimmedSearch.isEmpty else { return "\(total)" }
         return "\(visibleMeetings.count) of \(total)"
@@ -503,284 +494,6 @@ struct RecordingLibraryView: View {
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 12)
-        }
-    }
-
-    private var upcomingDayGroups: [UpcomingDayGroup] {
-        let calendar = Calendar.current
-        let grouped = Dictionary(grouping: recorderManager.upcomingEvents) {
-            calendar.startOfDay(for: $0.start)
-        }
-        var days = grouped.keys.sorted().map { day in
-            UpcomingDayGroup(day: day, events: grouped[day]!.sorted { $0.start < $1.start })
-        }
-        // Granola-style: today is always shown, even when it has nothing left.
-        let today = calendar.startOfDay(for: Date())
-        if !days.contains(where: { $0.day == today }) {
-            days.insert(UpcomingDayGroup(day: today, events: []), at: 0)
-        }
-        return days
-    }
-
-    @ViewBuilder
-    private var comingUpContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if showsGoogleCalendarConnectPrompt {
-                connectCalendarCard
-                    .padding(.horizontal, 12)
-                    .padding(.top, 2)
-                    .padding(.bottom, 10)
-            }
-
-            if recorderManager.upcomingEvents.isEmpty && recorderManager.isLoadingUpcomingEvents {
-                HStack {
-                    Spacer()
-                    ProgressView().controlSize(.small)
-                    Spacer()
-                }
-                .padding(.top, 40)
-            } else if recorderManager.upcomingEvents.isEmpty {
-                if recorderManager.googleCalendarActive || localCalendarGranted {
-                    VStack(spacing: 9) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 24, weight: .medium))
-                            .foregroundColor(Color.white.opacity(0.22))
-                        Text("Nothing on the calendar")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(secondary)
-                        Text("Ongoing and upcoming meetings from your connected calendars will appear here, ready to record.")
-                            .font(.system(size: 10))
-                            .foregroundColor(Color.white.opacity(0.38))
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 220)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 56)
-                }
-                // Otherwise the connect card above is the whole story.
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(upcomingDayGroups.enumerated()), id: \.element.day) { index, group in
-                        if index > 0 {
-                            Color.white.opacity(0.07)
-                                .frame(height: 1)
-                                .padding(.horizontal, 4)
-                        }
-                        UpcomingDayRow(
-                            group: group,
-                            accent: accent,
-                            adoptedEventID: adoptedEventID,
-                            onAdopt: adoptEvent
-                        )
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
-            }
-        }
-        .onAppear {
-            localCalendarGranted = CalendarMeetingSuggester.accessGranted
-            googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
-            recorderManager.refreshUpcomingEvents()
-            Task { await recorderManager.cloudStorage.refreshCalendarConnectionStatus() }
-        }
-    }
-
-    private var showsGoogleCalendarConnectPrompt: Bool {
-        GoogleCalendarConnectPrompt.shouldShowAutomaticPrompt(
-            declined: googleCalendarConnectDeclined,
-            googleCalendarConnected: !recorderManager.cloudStorage.calendarEmails.isEmpty
-        )
-    }
-
-    private var sourceRowDivider: some View {
-        Color.white.opacity(0.06).frame(height: 1)
-            .padding(.leading, 30)
-    }
-
-    /// Pinned calendar-sources bar: connected Google accounts, a connect row
-    /// unless the user declined that prompt, and the Mac calendar control.
-    private var calendarSourcesBar: some View {
-        VStack(spacing: 0) {
-            ForEach(recorderManager.cloudStorage.calendarEmails, id: \.self) { email in
-                sourceRow(
-                    icon: "calendar",
-                    title: email,
-                    value: "Google Calendar",
-                    actionTitle: "Remove",
-                    busy: false,
-                    help: "Stop reading this account's calendars"
-                ) {
-                    Task {
-                        await recorderManager.cloudStorage.disconnectCalendar(email: email)
-                        recorderManager.refreshUpcomingEvents()
-                    }
-                }
-                sourceRowDivider
-            }
-
-            if showsGoogleCalendarConnectRow {
-                sourceRow(
-                    icon: recorderManager.cloudStorage.calendarEmails.isEmpty ? "calendar.badge.plus" : "plus",
-                    title: recorderManager.cloudStorage.calendarEmails.isEmpty
-                        ? "Google Calendar"
-                        : "Add another Google account",
-                    value: recorderManager.cloudStorage.calendarEmails.isEmpty
-                        ? "Not connected"
-                        : "All accounts merge into one list",
-                    actionTitle: recorderManager.cloudStorage.isConnectingCalendar ? "Opening…" : "Connect",
-                    busy: recorderManager.cloudStorage.isConnectingCalendar,
-                    help: "Grant read-only calendar access for any Google account — your meeting library stays on the account you signed in with."
-                ) {
-                    connectGoogleCalendar()
-                }
-            }
-
-            if !localCalendarGranted {
-                if showsGoogleCalendarConnectRow || !recorderManager.cloudStorage.calendarEmails.isEmpty {
-                    sourceRowDivider
-                }
-                sourceRow(
-                    icon: "desktopcomputer",
-                    title: "Mac calendars",
-                    value: "Not connected",
-                    actionTitle: "Allow",
-                    busy: false,
-                    help: "Include calendars from the macOS Calendar app"
-                ) {
-                    Task {
-                        localCalendarGranted = await recorderManager.requestLocalCalendarAccess()
-                        recorderManager.refreshUpcomingEvents()
-                    }
-                }
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.white.opacity(0.05))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(Color.white.opacity(0.06), lineWidth: 1)
-        )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 10)
-    }
-
-    private func sourceRow(
-        icon: String,
-        title: String,
-        value: String,
-        actionTitle: String,
-        busy: Bool,
-        help: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundColor(Color.white.opacity(0.45))
-                .frame(width: 14)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundColor(Color.white.opacity(0.78))
-                Text(value)
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundColor(Color.white.opacity(0.42))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer(minLength: 8)
-            Button(action: action) {
-                Text(actionTitle)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(Color.white.opacity(0.88))
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color.white.opacity(0.1))
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(busy)
-            .help(help)
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
-    }
-
-    private var connectCalendarCard: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Label("Google Calendar", systemImage: "calendar.badge.plus")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(primary)
-            Text("Connect one or more Google accounts and their meetings appear here on one list — each call starts pre-named after the one you're in.")
-                .font(.system(size: 10.5))
-                .foregroundColor(Color.white.opacity(0.52))
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                Button(
-                    recorderManager.cloudStorage.isConnectingCalendar
-                        ? "Opening Google…"
-                        : "Connect Google Calendar"
-                ) {
-                    connectGoogleCalendar()
-                }
-                .buttonStyle(LibraryButtonStyle(prominent: true))
-                .disabled(recorderManager.cloudStorage.isConnectingCalendar)
-                Button("No Thanks") {
-                    GoogleCalendarConnectPrompt.decline()
-                    googleCalendarConnectDeclined = true
-                }
-                .buttonStyle(LibraryButtonStyle(prominent: false))
-            }
-            .padding(.top, 3)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
-        )
-    }
-
-    private var showsGoogleCalendarConnectRow: Bool {
-        !recorderManager.cloudStorage.calendarEmails.isEmpty || showsGoogleCalendarConnectPrompt
-    }
-
-    private var showsCalendarSourcesBar: Bool {
-        showsGoogleCalendarConnectRow || !localCalendarGranted
-    }
-
-    private func connectGoogleCalendar() {
-        if recorderManager.cloudStorage.mode == .managed && recorderManager.cloudStorage.isManagedSignedIn {
-            Task {
-                if await recorderManager.cloudStorage.connectGoogleCalendar() {
-                    googleCalendarConnectDeclined = GoogleCalendarConnectPrompt.isDeclined()
-                    recorderManager.refreshUpcomingEvents()
-                }
-            }
-        } else {
-            // Calendar connections attach to the OpenRec Cloud account, so
-            // signed-out and own-R2 users start from Settings.
-            onOpenSettings?()
-        }
-    }
-
-    private func adoptEvent(_ event: UpcomingCalendarEvent) {
-        recorderManager.adoptUpcomingEvent(event)
-        withAnimation(.easeOut(duration: 0.15)) { adoptedEventID = event.id }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-            if adoptedEventID == event.id {
-                withAnimation(.easeOut(duration: 0.2)) { adoptedEventID = nil }
-            }
         }
     }
 
@@ -1432,147 +1145,6 @@ struct RecordingLibraryView: View {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
-        return formatter
-    }()
-}
-
-private struct UpcomingDayRow: View {
-    let group: UpcomingDayGroup
-    let accent: Color
-    let adoptedEventID: String?
-    let onAdopt: (UpcomingCalendarEvent) -> Void
-
-    private var isToday: Bool {
-        Calendar.current.isDateInToday(group.day)
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(alignment: .top, spacing: 4) {
-                    Text(Self.dayNumberFormatter.string(from: group.day))
-                        .font(.system(size: 21, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.9))
-                    if isToday {
-                        Circle().fill(accent).frame(width: 5, height: 5).padding(.top, 5)
-                    }
-                }
-                Text(Self.monthFormatter.string(from: group.day))
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.55))
-                Text(Self.weekdayFormatter.string(from: group.day))
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundColor(.white.opacity(0.4))
-            }
-            .frame(width: 56, alignment: .leading)
-
-            VStack(alignment: .leading, spacing: 9) {
-                if group.events.isEmpty {
-                    HStack(spacing: 8) {
-                        RoundedRectangle(cornerRadius: 1.5)
-                            .fill(Color.white.opacity(0.18))
-                            .frame(width: 3, height: 26)
-                        Text("No more events today")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundColor(.white.opacity(0.38))
-                    }
-                    .padding(.vertical, 2)
-                } else {
-                    ForEach(group.events) { event in
-                        UpcomingEventRow(
-                            event: event,
-                            accent: accent,
-                            adopted: adoptedEventID == event.id,
-                            onAdopt: { onAdopt(event) }
-                        )
-                    }
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 12)
-    }
-
-    private static let dayNumberFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("d")
-        return formatter
-    }()
-
-    private static let monthFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("MMMM")
-        return formatter
-    }()
-
-    private static let weekdayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("EEE")
-        return formatter
-    }()
-}
-
-private struct UpcomingEventRow: View {
-    let event: UpcomingCalendarEvent
-    let accent: Color
-    let adopted: Bool
-    let onAdopt: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: onAdopt) {
-            HStack(alignment: .top, spacing: 8) {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(isOngoing ? accent : accent.opacity(0.55))
-                    .frame(width: 3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(event.title)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(.white.opacity(0.88))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    HStack(spacing: 6) {
-                        Text("\(Self.timeFormatter.string(from: event.start)) – \(Self.timeFormatter.string(from: event.end))")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.white.opacity(0.42))
-                        if adopted {
-                            Label("Set as call name", systemImage: "checkmark")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(.green.opacity(0.85))
-                                .transition(.opacity)
-                        } else if hovering {
-                            Text("Use as call name")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.white.opacity(0.45))
-                                .transition(.opacity)
-                        }
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(6)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.white.opacity(hovering ? 0.07 : 0))
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { value in
-            withAnimation(.easeOut(duration: 0.12)) { hovering = value }
-        }
-        .help("Pre-fill the recorder's call name with this meeting")
-    }
-
-    private var isOngoing: Bool {
-        let now = Date()
-        return event.start <= now && event.end >= now
-    }
-
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
         return formatter
     }()
 }
