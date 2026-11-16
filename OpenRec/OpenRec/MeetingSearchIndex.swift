@@ -406,6 +406,7 @@ final class MeetingSearchIndex {
         appendBody(nextSteps(for: meeting), to: &fields)
         let transcript = SpeakerNames.apply(meeting.speakerNames ?? [:], to: meeting.transcript ?? "")
         appendBody(transcript, to: &fields)
+        appendBody(RecordingNotesText.lines(meeting.notes ?? []) ?? "", to: &fields)
         appendBody(meeting.insights.participants.joined(separator: "\n"), to: &fields)
         appendBody(speakerNames(for: meeting), to: &fields)
         return fields

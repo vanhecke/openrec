@@ -30,8 +30,16 @@ struct OpenAIService {
         try validate(response: response, data: data)
     }
 
-    func generateInsights(transcript: String, callTitle: String?) async throws -> MeetingInsights {
-        let request = try makeInsightsRequest(transcript: transcript, callTitle: callTitle)
+    func generateInsights(
+        transcript: String,
+        callTitle: String?,
+        userNotes: String? = nil
+    ) async throws -> MeetingInsights {
+        let request = try makeInsightsRequest(
+            transcript: transcript,
+            callTitle: callTitle,
+            userNotes: userNotes
+        )
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
 
@@ -48,11 +56,13 @@ struct OpenAIService {
     func makeInsightsRequest(
         transcript: String,
         callTitle: String?,
+        userNotes: String? = nil,
         defaults: UserDefaults = .standard
     ) throws -> URLRequest {
         let prompt = AIPromptStore.meetingMemoryUser(
             transcript: transcript,
             callTitle: callTitle,
+            userNotes: userNotes,
             defaults: defaults
         )
         let body: [String: Any] = [

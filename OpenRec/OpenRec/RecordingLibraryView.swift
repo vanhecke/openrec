@@ -2,6 +2,7 @@ import SwiftUI
 import AVKit
 import AppKit
 import Combine
+import CoreMedia
 
 struct RecordingLibrarySelectionRequest: Equatable {
     let meetingID: UUID
@@ -63,6 +64,10 @@ enum MeetingClipboardText {
         nonEmpty(meeting.insights.aiNotes)
     }
 
+    static func userNotes(for meeting: MeetingRecord) -> String? {
+        RecordingNotesText.lines(meeting.notes ?? [])
+    }
+
     static func nextSteps(for meeting: MeetingRecord) -> String? {
         guard !meeting.insights.actionItems.isEmpty else { return nil }
         return meeting.insights.actionItems.map { item in
@@ -87,6 +92,7 @@ enum MeetingClipboardText {
         var sections = [meeting.title]
         if let participants = participants(for: meeting) { sections.append("Participants\n\(participants)") }
         if let summary = summary(for: meeting) { sections.append("Summary\n\(summary)") }
+        if let userNotes = userNotes(for: meeting) { sections.append("My Notes\n\(userNotes)") }
         if let aiNotes = aiNotes(for: meeting) { sections.append("AI Notes\n\(aiNotes)") }
         if let nextSteps = nextSteps(for: meeting) { sections.append("Next steps\n\(nextSteps)") }
         if let decisions = decisions(for: meeting) { sections.append("Decisions\n\(decisions)") }
@@ -153,6 +159,8 @@ struct RecordingLibraryView: View {
     @State private var mediaTask: Task<Void, Never>?
     @State private var handledSelectionToken: UUID?
     @State private var deletingMeetingID: UUID?
+    @State private var highlightedCueID: UUID?
+    @State private var transcriptScrollToken = UUID()
 
     private let background = Color(red: 0.105, green: 0.11, blue: 0.115)
     private let sidebar = Color(red: 0.13, green: 0.135, blue: 0.14)
@@ -855,6 +863,12 @@ struct RecordingLibraryView: View {
     }
 
     private func detailContent(_ meeting: MeetingRecord) -> some View {
+        ScrollViewReader { proxy in
+            detailScroll(meeting, proxy: proxy)
+        }
+    }
+
+    private func detailScroll(_ meeting: MeetingRecord, proxy: ScrollViewProxy) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if meeting.saveStatus == .processing {
@@ -890,6 +904,7 @@ struct RecordingLibraryView: View {
 
                 mediaCard(meeting)
                 speakerNamesSection(meeting)
+                myNotesSection(meeting)
 
                 HStack(spacing: 4) {
                     ForEach(MeetingDetailTab.allCases) { tab in
@@ -908,6 +923,22 @@ struct RecordingLibraryView: View {
                 }
             }
             .padding(22)
+        }
+        .onChange(of: transcriptScrollToken) { _ in
+            scrollToHighlightedCue(proxy)
+        }
+        .onChange(of: selectedTab) { tab in
+            guard tab == .transcript, highlightedCueID != nil else { return }
+            scrollToHighlightedCue(proxy)
+        }
+    }
+
+    private func scrollToHighlightedCue(_ proxy: ScrollViewProxy) {
+        guard let id = highlightedCueID else { return }
+        DispatchQueue.main.async {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                proxy.scrollTo(id, anchor: .center)
+            }
         }
     }
 
@@ -1067,13 +1098,40 @@ struct RecordingLibraryView: View {
         }
     }
 
+    private func myNotesSection(_ meeting: MeetingRecord) -> some View {
+        MeetingSection(
+            title: "My Notes",
+            icon: "note.text",
+            copyText: MeetingClipboardText.userNotes(for: meeting)
+        ) {
+            MeetingNotesEditor(
+                notes: meeting.notes ?? [],
+                primary: primary,
+                secondary: secondary,
+                accent: accent,
+                playbackElapsed: { playbackElapsed() },
+                onJump: { jumpToNote($0, in: meeting) },
+                onUpdate: { commitNotes($0, on: meeting) }
+            )
+        }
+    }
+
     private func transcriptContent(_ meeting: MeetingRecord) -> some View {
         MeetingSection(
             title: "Transcript",
             icon: "text.quote",
             copyText: MeetingClipboardText.transcript(for: meeting)
         ) {
-            if let transcript = MeetingClipboardText.transcript(for: meeting) {
+            if let cues = meeting.transcriptCues, !cues.isEmpty {
+                TranscriptCueList(
+                    cues: cues,
+                    speakerNames: meeting.speakerNames ?? [:],
+                    highlightedID: highlightedCueID,
+                    primary: primary,
+                    secondary: secondary,
+                    accent: accent
+                )
+            } else if let transcript = MeetingClipboardText.transcript(for: meeting) {
                 Text(transcript)
                     .font(.system(size: 12))
                     .foregroundColor(primary.opacity(0.82))
@@ -1178,6 +1236,12 @@ struct RecordingLibraryView: View {
         if updated.speakerNames != nil {
             current.speakerNames = updated.speakerNames
         }
+        if updated.notes != nil {
+            current.notes = updated.notes
+        }
+        if updated.transcriptCues != nil {
+            current.transcriptCues = updated.transcriptCues
+        }
         return current
     }
 
@@ -1203,6 +1267,45 @@ struct RecordingLibraryView: View {
         }
     }
 
+    private func commitNotes(_ notes: [RecordingNote], on meeting: MeetingRecord) {
+        var updated = meeting
+        updated.notes = notes.nilIfEmpty
+        updated.updatedAt = Date()
+        do {
+            try recorderManager.cloudStorage.upsertLocalMeeting(updated)
+            detail = updated
+        } catch {
+            detailError = error.localizedDescription
+        }
+    }
+
+    private func jumpToNote(_ seconds: TimeInterval, in meeting: MeetingRecord) {
+        if let cue = TranscriptCues.nearest(to: seconds, in: meeting.transcriptCues ?? []) {
+            highlightedCueID = cue.id
+            if selectedTab != .transcript {
+                selectedTab = .transcript
+            }
+            transcriptScrollToken = UUID()
+        }
+        guard meeting.hasPlayableScreen || meeting.hasPlayableAudio else { return }
+        let kind: MeetingMediaKind
+        if let playerKind {
+            kind = playerKind
+        } else if meeting.hasPlayableScreen {
+            kind = .screen
+        } else {
+            kind = .audio
+        }
+        play(meeting, kind: kind, at: seconds)
+    }
+
+    private func playbackElapsed() -> TimeInterval {
+        guard let time = player?.currentTime(), time.isNumeric else { return 0 }
+        let seconds = time.seconds
+        guard seconds.isFinite else { return 0 }
+        return max(0, seconds)
+    }
+
     private func commitSpeakerName(_ name: String, for label: String, on meeting: MeetingRecord) {
         var updated = meeting
         var mapping = updated.speakerNames ?? [:]
@@ -1223,7 +1326,11 @@ struct RecordingLibraryView: View {
         }
     }
 
-    private func play(_ meeting: MeetingRecord, kind: MeetingMediaKind) {
+    private func play(_ meeting: MeetingRecord, kind: MeetingMediaKind, at seconds: TimeInterval? = nil) {
+        if let seconds, let player, playerKind == kind, loadingMedia == nil {
+            seek(player, to: seconds)
+            return
+        }
         mediaTask?.cancel()
         player?.pause()
         loadingMedia = kind
@@ -1237,12 +1344,26 @@ struct RecordingLibraryView: View {
                 let next = AVPlayer(url: url)
                 player = next
                 playerKind = kind
-                next.play()
+                if let seconds {
+                    seek(next, to: seconds)
+                } else {
+                    next.play()
+                }
             } catch {
                 guard !Task.isCancelled, selectedID == requestedID else { return }
                 mediaError = error.localizedDescription
             }
             if selectedID == requestedID { loadingMedia = nil }
+        }
+    }
+
+    private func seek(_ player: AVPlayer, to seconds: TimeInterval) {
+        let time = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
+        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { finished in
+            guard finished else { return }
+            Task { @MainActor in
+                player.play()
+            }
         }
     }
 

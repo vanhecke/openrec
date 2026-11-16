@@ -31,6 +31,11 @@
 		A1000064243B0001 /* MeetingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000074243B0001 /* MeetingModels.swift */; };
 		A10000E0243B0006 /* LocalMeetingTextFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000E1243B0006 /* LocalMeetingTextFiles.swift */; };
 		A1000100243B0008 /* MeetingSearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000101243B0008 /* MeetingSearchIndex.swift */; };
+		A1000110243B0009 /* RecordingNotes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000111243B0009 /* RecordingNotes.swift */; };
+		A1000112243B0009 /* TranscriptCues.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000113243B0009 /* TranscriptCues.swift */; };
+		A1000114243B0009 /* RecordingNotesSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000115243B0009 /* RecordingNotesSession.swift */; };
+		A1000116243B0009 /* RecordingNotesPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000117243B0009 /* RecordingNotesPanel.swift */; };
+		A1000118243B0009 /* MeetingNotesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000119243B0009 /* MeetingNotesSection.swift */; };
 		A1000065243B0001 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000075243B0001 /* OnboardingView.swift */; };
 		A1000066243B0001 /* OpenAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000076243B0001 /* OpenAIService.swift */; };
 		A10000CF243B0003 /* GrokService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000CE243B0003 /* GrokService.swift */; };
@@ -76,6 +81,11 @@
 		A1000074243B0001 /* MeetingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingModels.swift; sourceTree = "<group>"; };
 		A10000E1243B0006 /* LocalMeetingTextFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMeetingTextFiles.swift; sourceTree = "<group>"; };
 		A1000101243B0008 /* MeetingSearchIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingSearchIndex.swift; sourceTree = "<group>"; };
+		A1000111243B0009 /* RecordingNotes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingNotes.swift; sourceTree = "<group>"; };
+		A1000113243B0009 /* TranscriptCues.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptCues.swift; sourceTree = "<group>"; };
+		A1000115243B0009 /* RecordingNotesSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingNotesSession.swift; sourceTree = "<group>"; };
+		A1000117243B0009 /* RecordingNotesPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingNotesPanel.swift; sourceTree = "<group>"; };
+		A1000119243B0009 /* MeetingNotesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingNotesSection.swift; sourceTree = "<group>"; };
 		A1000075243B0001 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A1000076243B0001 /* OpenAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIService.swift; sourceTree = "<group>"; };
 		A10000CE243B0003 /* GrokService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokService.swift; sourceTree = "<group>"; };
@@ -154,6 +164,11 @@
 				A1000074243B0001 /* MeetingModels.swift */,
 				A10000E1243B0006 /* LocalMeetingTextFiles.swift */,
 				A1000101243B0008 /* MeetingSearchIndex.swift */,
+				A1000111243B0009 /* RecordingNotes.swift */,
+				A1000113243B0009 /* TranscriptCues.swift */,
+				A1000115243B0009 /* RecordingNotesSession.swift */,
+				A1000117243B0009 /* RecordingNotesPanel.swift */,
+				A1000119243B0009 /* MeetingNotesSection.swift */,
 				A1000075243B0001 /* OnboardingView.swift */,
 				A1000076243B0001 /* OpenAIService.swift */,
 				A10000CE243B0003 /* GrokService.swift */,
@@ -288,6 +303,11 @@
 				A1000064243B0001 /* MeetingModels.swift in Sources */,
 				A10000E0243B0006 /* LocalMeetingTextFiles.swift in Sources */,
 				A1000100243B0008 /* MeetingSearchIndex.swift in Sources */,
+				A1000110243B0009 /* RecordingNotes.swift in Sources */,
+				A1000112243B0009 /* TranscriptCues.swift in Sources */,
+				A1000114243B0009 /* RecordingNotesSession.swift in Sources */,
+				A1000116243B0009 /* RecordingNotesPanel.swift in Sources */,
+				A1000118243B0009 /* MeetingNotesSection.swift in Sources */,
 				A1000065243B0001 /* OnboardingView.swift in Sources */,
 				A1000066243B0001 /* OpenAIService.swift in Sources */,
 				A10000CF243B0003 /* GrokService.swift in Sources */,

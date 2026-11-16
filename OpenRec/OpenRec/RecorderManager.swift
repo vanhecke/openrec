@@ -182,6 +182,7 @@ final class RecorderManager: ObservableObject {
     @Published private(set) var googleCalendarActive = false
 
     let transcriptionManager = TranscriptionManager()
+    let recordingNotes = RecordingNotesSession()
     let cloudStorage = CloudStorageManager()
     let webhookSettings = WebhookSettings()
     private let calendarSuggester = CalendarMeetingSuggester()
@@ -239,6 +240,10 @@ final class RecorderManager: ObservableObject {
         refreshMicrophones()
 
         transcriptionManager.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        recordingNotes.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
@@ -431,6 +436,7 @@ final class RecorderManager: ObservableObject {
         lastArtifacts = nil
         mediaAppendError = nil
         cloudUploadProgress = nil
+        recordingNotes.reset()
         transcriptionManager.resetTranscript()
 
         let clientName = resolveClientName()
@@ -614,12 +620,22 @@ final class RecorderManager: ObservableObject {
         recorder?.stop()
     }
 
+    /// Elapsed recording time at this instant. The HUD timer only ticks once a second,
+    /// so a note stamps this value when typing starts.
+    func currentRecordingElapsed() -> TimeInterval {
+        if let recordingStartTime {
+            return max(0, Date().timeIntervalSince(recordingStartTime))
+        }
+        return max(0, duration)
+    }
+
     /// Stops capture and permanently discards everything this call produced:
     /// media already streamed to cloud storage, the provisional meeting row,
     /// and the live transcript. The caller is responsible for confirming with
     /// the user first — this is not undoable.
     func cancelRecording() {
         guard isRecording else { return }
+        recordingNotes.reset()
         discardRecorderOnCompletion = true
         transitionRecordingToProcessing(stoppedAt: Date())
         // The stop transition prepares the notes panel for processing; a
@@ -631,6 +647,8 @@ final class RecorderManager: ObservableObject {
 
     private func transitionRecordingToProcessing(stoppedAt: Date) {
         guard isRecording else { return }
+        let capturedNotes = recordingNotes.notes
+        recordingNotes.isOpen = false
         let startedAt = recordingStartTime ?? stoppedAt.addingTimeInterval(-duration)
         durationTimer?.invalidate()
         durationTimer = nil
@@ -654,6 +672,7 @@ final class RecorderManager: ObservableObject {
             callApp: detectedCall?.appName,
             callTitle: detectedCall?.title ?? pendingManualTitle,
             transcript: nil,
+            notes: capturedNotes.nilIfEmpty,
             insights: MeetingInsights(title: initialTitle, participants: detectedCall?.participants ?? []),
             hasScreenRecording: false,
             hasAudioRecording: false,
@@ -831,6 +850,7 @@ final class RecorderManager: ObservableObject {
         }
 
         var meeting = cloudStorage.localMeeting(id: meetingID) ?? pendingMeetingRecord(id: meetingID)
+        applyLiveNotes(to: &meeting)
         var warnings: [String] = []
         do {
             savePhase = .uploading
@@ -874,7 +894,7 @@ final class RecorderManager: ObservableObject {
                 required: pendingPreferences.storeTranscriptInCloud,
                 failure: transcriptionFailure
             )
-            meeting.transcript = pendingPreferences.storeTranscriptInCloud ? transcript : nil
+            assignRetainedTranscript(transcript, to: &meeting, retain: pendingPreferences.storeTranscriptInCloud)
             let callTitle = detectedCall?.title ?? pendingManualTitle
             let identified = await identifiedSpeakerNames(
                 transcript: transcript,
@@ -894,7 +914,8 @@ final class RecorderManager: ObservableObject {
             do {
                 let generated = try await transcriptionManager.analyze(
                     callTitle: callTitle,
-                    speakerNames: meeting.speakerNames ?? [:]
+                    speakerNames: meeting.speakerNames ?? [:],
+                    userNotes: RecordingNotesText.lines(meeting.notes ?? [])
                 )
                 let verified = detectedCall?.participants ?? meeting.insights.participants
                 let participants = (verified + generated.participants).reduce(into: [String]()) { result, participant in
@@ -1126,6 +1147,7 @@ final class RecorderManager: ObservableObject {
             return
         }
         var meeting = record
+        applyLiveNotes(to: &meeting)
         var warnings: [String] = []
         do {
             meeting.saveStatus = .processing
@@ -1175,7 +1197,11 @@ final class RecorderManager: ObservableObject {
                 required: meeting.preferences.storeTranscriptInCloud,
                 failure: transcriptionFailure
             )
-            meeting.transcript = meeting.preferences.storeTranscriptInCloud ? transcript : nil
+            assignRetainedTranscript(
+                transcript,
+                to: &meeting,
+                retain: meeting.preferences.storeTranscriptInCloud
+            )
             let identified = await identifiedSpeakerNames(
                 transcript: transcript,
                 callTitle: meeting.callTitle,
@@ -1196,7 +1222,8 @@ final class RecorderManager: ObservableObject {
                     let generated = try await analyzeRecoveredTranscript(
                         transcript,
                         callTitle: meeting.callTitle,
-                        speakerNames: meeting.speakerNames ?? [:]
+                        speakerNames: meeting.speakerNames ?? [:],
+                        userNotes: RecordingNotesText.lines(meeting.notes ?? [])
                     )
                     let participants = (meeting.insights.participants + generated.participants)
                         .reduce(into: [String]()) { result, participant in
@@ -1435,7 +1462,8 @@ final class RecorderManager: ObservableObject {
     private func analyzeRecoveredTranscript(
         _ transcript: String,
         callTitle: String?,
-        speakerNames: [String: String]
+        speakerNames: [String: String],
+        userNotes: String? = nil
     ) async throws -> MeetingInsights {
         transcriptionManager.isAnalyzing = true
         defer { transcriptionManager.isAnalyzing = false }
@@ -1443,7 +1471,8 @@ final class RecorderManager: ObservableObject {
             let generated = try await transcriptionManager.generateInsights(
                 transcript: transcript,
                 callTitle: callTitle,
-                speakerNames: speakerNames
+                speakerNames: speakerNames,
+                userNotes: userNotes
             )
             transcriptionManager.insights = generated
             return generated
@@ -1494,6 +1523,7 @@ final class RecorderManager: ObservableObject {
             createdAt: now,
             updatedAt: now
         )
+        applyLiveNotes(to: &meeting)
         do {
             meeting.saveStatus = .processing
             meeting.saveStage = .storingMetadata
@@ -1558,10 +1588,8 @@ final class RecorderManager: ObservableObject {
             let baseName = artifacts.screenURL.deletingPathExtension().lastPathComponent
             if pendingPreferences.storeTranscriptInCloud {
                 try transcriptionManager.saveTranscript(to: outputDir, baseName: baseName)
-                meeting.transcript = transcript
-            } else {
-                meeting.transcript = nil
             }
+            assignRetainedTranscript(transcript, to: &meeting, retain: pendingPreferences.storeTranscriptInCloud)
             let callTitle = detectedCall?.title ?? pendingManualTitle
             let identified = await identifiedSpeakerNames(
                 transcript: transcript,
@@ -1580,7 +1608,8 @@ final class RecorderManager: ObservableObject {
             do {
                 let generated = try await transcriptionManager.analyze(
                     callTitle: callTitle,
-                    speakerNames: meeting.speakerNames ?? [:]
+                    speakerNames: meeting.speakerNames ?? [:],
+                    userNotes: RecordingNotesText.lines(meeting.notes ?? [])
                 )
                 let verified = detectedCall?.participants ?? []
                 let participants = (verified + generated.participants).reduce(into: [String]()) { result, participant in
@@ -1694,10 +1723,31 @@ final class RecorderManager: ObservableObject {
             pendingManualTitle = nil
             pendingStorageContext = nil
             detectedCall = nil
+            recordingNotes.reset()
             onProcessingComplete?()
         } catch {
             failSaving(error.localizedDescription)
         }
+    }
+
+    private func applyLiveNotes(to meeting: inout MeetingRecord) {
+        let live = recordingNotes.notes
+        guard !live.isEmpty else { return }
+        if meeting.notes?.isEmpty != false {
+            meeting.notes = live
+        }
+    }
+
+    /// Keeps timed transcript lines only when the transcript itself is retained.
+    private func assignRetainedTranscript(_ transcript: String, to meeting: inout MeetingRecord, retain: Bool) {
+        guard retain else {
+            meeting.transcript = nil
+            meeting.transcriptCues = nil
+            return
+        }
+        meeting.transcript = transcript
+        let cues = TranscriptCues.captured(from: transcriptionManager.committedSegments)
+        meeting.transcriptCues = cues.isEmpty ? nil : cues
     }
 
     private func pendingMeetingRecord(id: UUID) -> MeetingRecord {
@@ -1711,6 +1761,7 @@ final class RecorderManager: ObservableObject {
             callApp: detectedCall?.appName,
             callTitle: detectedCall?.title ?? pendingManualTitle,
             transcript: nil,
+            notes: recordingNotes.notes.nilIfEmpty,
             insights: MeetingInsights(
                 title: detectedCall?.displayTitle ?? pendingManualTitle ?? "Untitled call",
                 participants: detectedCall?.participants ?? []
@@ -1753,6 +1804,7 @@ final class RecorderManager: ObservableObject {
         pendingManualTitle = nil
         pendingStorageContext = nil
         detectedCall = nil
+        recordingNotes.reset()
         onProcessingComplete?()
     }
 

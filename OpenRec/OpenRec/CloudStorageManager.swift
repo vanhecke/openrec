@@ -44,6 +44,8 @@ enum ManagedSignOutPrivacy {
         stub.callTitle = nil
         stub.transcript = nil
         stub.speakerNames = nil
+        stub.notes = nil
+        stub.transcriptCues = nil
         stub.insights = MeetingInsights(title: needsRecovery ? "Recovery recording" : "Local recording")
         if !needsRecovery {
             stub.localScreenPath = meeting.localScreenPath.flatMap { fileExists($0) ? $0 : nil }
@@ -1248,6 +1250,7 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
                 }
                 if !meeting.preferences.storeTranscriptInCloud {
                     meeting.transcript = nil
+                    meeting.transcriptCues = nil
                     if let transcriptURL { try? FileManager.default.removeItem(at: transcriptURL) }
                 }
                 meeting.saveStatus = .saved

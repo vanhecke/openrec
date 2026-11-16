@@ -37,11 +37,22 @@ struct FloatingPanelView: View {
                     if windowState.isCollapsed {
                         CompactControlsView(recorderManager: recorderManager, onOpenLibrary: onOpenLibrary)
                     } else if recorderManager.isRecording {
-                        // Center the controls row in the space below the header so
-                        // the panel's top and bottom breathing room stay balanced.
-                        RecordingControlsView(recorderManager: recorderManager)
-                            .frame(maxHeight: .infinity)
-                            .layoutPriority(1)
+                        if recorderManager.recordingNotes.isOpen {
+                            VStack(spacing: 0) {
+                                RecordingControlsView(recorderManager: recorderManager)
+                                RecordingNotesPanel(
+                                    session: recorderManager.recordingNotes,
+                                    elapsed: { recorderManager.currentRecordingElapsed() }
+                                )
+                                .frame(maxHeight: .infinity)
+                            }
+                        } else {
+                            // Center the controls row in the space below the header so
+                            // the panel's top and bottom breathing room stay balanced.
+                            RecordingControlsView(recorderManager: recorderManager)
+                                .frame(maxHeight: .infinity)
+                                .layoutPriority(1)
+                        }
                     } else {
                         PopoverContentView(recorderManager: recorderManager, onOpenLibrary: onOpenLibrary)
                     }
@@ -75,6 +86,11 @@ struct FloatingPanelView: View {
         }
         .onChange(of: recorderManager.savedConfirmationState) { state in
             scheduleSavedConfirmationDismissal(for: state)
+        }
+        .onChange(of: recorderManager.recordingNotes.isOpen) { isOpen in
+            if isOpen && windowState.isCollapsed {
+                windowState.isCollapsed = false
+            }
         }
     }
 
@@ -145,16 +161,27 @@ private struct HeaderView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .recorderWindowDragRegion()
 
-            Button(action: onOpenSettings) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 10.5, weight: .medium))
+            if recorderManager.isRecording {
+                Button { recorderManager.recordingNotes.isOpen.toggle() } label: {
+                    Image(systemName: "note.text")
+                        .font(.system(size: 10.5, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.white.opacity(recorderManager.recordingNotes.isOpen ? 1 : 0.66))
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .help("Notes (⇧⌘N)")
+            } else {
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 10.5, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.white.opacity(hoveringSettings ? 1 : 0.66))
+                .disabled(recorderManager.isProcessing)
+                .opacity(recorderManager.isProcessing ? 0.35 : 1)
+                .help("Settings")
+                .onHover { hoveringSettings = $0 }
             }
-            .buttonStyle(.plain)
-            .foregroundColor(.white.opacity(hoveringSettings ? 1 : 0.66))
-            .disabled(recorderManager.isRecording || recorderManager.isProcessing)
-            .opacity(recorderManager.isRecording || recorderManager.isProcessing ? 0.35 : 1)
-            .help("Settings")
-            .onHover { hoveringSettings = $0 }
 
             Button {
                 windowState.isCollapsed.toggle()

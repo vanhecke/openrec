@@ -31,8 +31,16 @@ struct GrokService {
         try validate(response: response, data: data)
     }
 
-    func generateInsights(transcript: String, callTitle: String?) async throws -> MeetingInsights {
-        let request = try makeInsightsRequest(transcript: transcript, callTitle: callTitle)
+    func generateInsights(
+        transcript: String,
+        callTitle: String?,
+        userNotes: String? = nil
+    ) async throws -> MeetingInsights {
+        let request = try makeInsightsRequest(
+            transcript: transcript,
+            callTitle: callTitle,
+            userNotes: userNotes
+        )
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
         return try decodeInsights(from: data)
@@ -56,6 +64,7 @@ struct GrokService {
     func makeInsightsRequest(
         transcript: String,
         callTitle: String?,
+        userNotes: String? = nil,
         defaults: UserDefaults = .standard
     ) throws -> URLRequest {
         // grok-4.7 can reason before the structured notes, and long calls
@@ -71,6 +80,7 @@ struct GrokService {
             "content": AIPromptStore.meetingMemoryUser(
                 transcript: transcript,
                 callTitle: callTitle,
+                userNotes: userNotes,
                 defaults: defaults
             ),
         ]
@@ -519,18 +529,21 @@ enum MeetingMemoryClient {
         apiKey: String,
         transcript: String,
         callTitle: String?,
+        userNotes: String? = nil,
         session: URLSession = .shared
     ) async throws -> MeetingInsights {
         switch provider {
         case .openai:
             return try await OpenAIService(apiKey: apiKey, session: session).generateInsights(
                 transcript: transcript,
-                callTitle: callTitle
+                callTitle: callTitle,
+                userNotes: userNotes
             )
         case .grok:
             return try await GrokService(apiKey: apiKey, session: session).generateInsights(
                 transcript: transcript,
-                callTitle: callTitle
+                callTitle: callTitle,
+                userNotes: userNotes
             )
         }
     }

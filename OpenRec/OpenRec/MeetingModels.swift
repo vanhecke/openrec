@@ -277,6 +277,12 @@ struct MeetingRecord: Codable, Identifiable, Equatable {
     /// saved before speaker identification. Stored on this Mac; cloud rows do
     /// not have a column for it, so a library refresh keeps the local map.
     var speakerNames: [String: String]? = nil
+    /// Lines typed during the recording, each stamped when typing started.
+    /// Nil on meetings saved before notes existed.
+    var notes: [RecordingNote]? = nil
+    /// Timed transcript lines so a note can scroll to the nearest one.
+    /// Nil when the transcript was not retained, or on older meetings.
+    var transcriptCues: [TranscriptCue]? = nil
     var insights: MeetingInsights
     var hasScreenRecording: Bool
     var hasAudioRecording: Bool
@@ -322,10 +328,13 @@ struct MeetingRecord: Codable, Identifiable, Equatable {
         hasAudioRecording || (localAudioURL != nil && (preferences.keepAudioRecording || saveStatus != .saved))
     }
 
-    /// Cloud meetings do not store speaker names. Keep a map already saved on this Mac.
+    /// Cloud meetings do not store speaker names, notes, or transcript cues.
+    /// Keep the copies already saved on this Mac.
     func withSpeakerNamesPreserved(from local: MeetingRecord) -> MeetingRecord {
         var copy = self
         copy.speakerNames = local.speakerNames ?? speakerNames
+        copy.notes = local.notes ?? notes
+        copy.transcriptCues = local.transcriptCues ?? transcriptCues
         return copy
     }
 
