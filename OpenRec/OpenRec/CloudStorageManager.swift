@@ -83,6 +83,8 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
     var calendarEmail: String? { calendarEmails.first }
     @Published var statusMessage: String?
     @Published private(set) var libraryMeetings: [MeetingRecord] = []
+    /// Full-text index of `libraryMeetings`, kept in step with saves, edits, and deletes.
+    private let meetingSearchIndex = MeetingSearchIndex()
     @Published private(set) var isLoadingLibrary = false
     @Published var libraryError: String?
 
@@ -230,7 +232,7 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
         mode = StorageMode.resolved(from: saved)
         super.init()
         removeLegacyRemoteMediaCacheIfNeeded()
-        libraryMeetings = loadLocalMeetingRecords()
+        replaceLibrary(loadLocalMeetingRecords())
         Task { @MainActor [weak self] in
             await self?.abortStaleMediaUploadsFromPriorLaunch()
         }
@@ -531,7 +533,7 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
         KeychainStore.set("", for: "managed-session-token")
         managedEmail = nil
         UserDefaults.standard.removeObject(forKey: "ManagedEmail")
-        libraryMeetings = loadLocalMeetingRecords()
+        replaceLibrary(loadLocalMeetingRecords())
         let mediaCache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
             .appendingPathComponent("\(applicationSupportNamespace)/Media", isDirectory: true)
         try? FileManager.default.removeItem(at: mediaCache)
@@ -904,7 +906,7 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
         if FileManager.default.fileExists(atPath: localURL.path) {
             try FileManager.default.removeItem(at: localURL)
         }
-        libraryMeetings.removeAll { $0.id == meetingID }
+        removeLibraryMeeting(id: meetingID)
     }
 
     /// Permanently deletes a saved meeting everywhere it lives: cloud metadata
@@ -962,7 +964,7 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
         if FileManager.default.fileExists(atPath: localURL.path) {
             try FileManager.default.removeItem(at: localURL)
         }
-        libraryMeetings.removeAll { $0.id == meeting.id }
+        removeLibraryMeeting(id: meeting.id)
         if meeting.storageMode == .local {
             let recordingsDirectory = Self.recordingsDirectory()
             var folders = Set([meeting.localScreenPath, meeting.localAudioPath].compactMap { path -> String? in
@@ -1296,23 +1298,23 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
             switch mode {
             case .managed:
                 guard isManagedSignedIn else {
-                    libraryMeetings = local.sorted { $0.startedAt > $1.startedAt }
+                    replaceLibrary(local.sorted { $0.startedAt > $1.startedAt })
                     return
                 }
                 remote = try await fetchManagedMeetings()
             case .ownR2:
                 guard isReady else {
-                    libraryMeetings = local.sorted { $0.startedAt > $1.startedAt }
+                    replaceLibrary(local.sorted { $0.startedAt > $1.startedAt })
                     return
                 }
                 remote = try await fetchOwnR2Meetings()
             case .local:
-                libraryMeetings = local.sorted { $0.startedAt > $1.startedAt }
+                replaceLibrary(local.sorted { $0.startedAt > $1.startedAt })
                 return
             }
-            libraryMeetings = merge(remote: remote, local: local)
+            replaceLibrary(merge(remote: remote, local: local))
         } catch {
-            libraryMeetings = local.sorted { $0.startedAt > $1.startedAt }
+            replaceLibrary(local.sorted { $0.startedAt > $1.startedAt })
             libraryError = "Cloud meetings could not be refreshed. Showing this Mac’s meetings. \(error.localizedDescription)"
         }
     }
@@ -1774,12 +1776,27 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
     }
 
     private func mergeIntoLibrary(_ meeting: MeetingRecord) {
+        meetingSearchIndex.upsert(meeting)
         if let index = libraryMeetings.firstIndex(where: { $0.id == meeting.id }) {
             libraryMeetings[index] = meeting
         } else {
             libraryMeetings.append(meeting)
         }
         libraryMeetings.sort { $0.startedAt > $1.startedAt }
+    }
+
+    func librarySearchResults(matching query: String) -> [MeetingSearchHit] {
+        meetingSearchIndex.search(query: query)
+    }
+
+    private func replaceLibrary(_ meetings: [MeetingRecord]) {
+        meetingSearchIndex.replaceAll(meetings)
+        libraryMeetings = meetings
+    }
+
+    private func removeLibraryMeeting(id: UUID) {
+        meetingSearchIndex.remove(id: id)
+        libraryMeetings.removeAll { $0.id == id }
     }
 
     private func exchange(code: String, baseURL: URL) async throws -> (token: String, email: String) {
