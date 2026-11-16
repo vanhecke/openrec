@@ -295,8 +295,8 @@ final class RecorderManager: ObservableObject {
         }
     }
 
-    /// Load ongoing/upcoming calendar events for the Meetings window's
-    /// "Coming up" list, merging the connected Google Calendar (managed cloud)
+    /// Load ongoing/upcoming calendar events for the Meetings window's Home
+    /// list, merging the connected Google Calendar (managed cloud)
     /// with the Mac's local calendars. A newer request supersedes an older one,
     /// so activation, timer, and manual refreshes can never publish stale data.
     func refreshUpcomingEvents(withinDays days: Int = 7) {

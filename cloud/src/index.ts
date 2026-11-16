@@ -1557,6 +1557,7 @@ async function fetchEventsForConnection(
       calendarURL.searchParams.set("singleEvents", "true");
       calendarURL.searchParams.set("orderBy", "startTime");
       calendarURL.searchParams.set("maxResults", "30");
+      calendarURL.searchParams.set("conferenceDataVersion", "1");
       const eventsResponse = await fetch(calendarURL, { headers: { authorization: `Bearer ${token.access_token}` } });
       // A single unreadable calendar (revoked share, permissions) must not
       // break calendar context for the rest.
@@ -1608,6 +1609,9 @@ async function fetchGoogleCalendarEvents(
 }
 
 function calendarEventPayload(event: GoogleCalendarEvent) {
+  const conferenceUris = (event.conferenceData?.entryPoints ?? [])
+    .map((entry) => entry.uri)
+    .filter((uri): uri is string => Boolean(uri));
   return {
     id: event.id,
     title: event.summary ?? "Calendar call",
@@ -1617,6 +1621,10 @@ function calendarEventPayload(event: GoogleCalendarEvent) {
       .filter((attendee) => attendee.responseStatus !== "declined")
       .map((attendee) => attendee.displayName || attendee.email)
       .filter(Boolean),
+    location: event.location ?? null,
+    description: event.description ? event.description.slice(0, 4000) : null,
+    hangoutLink: event.hangoutLink ?? null,
+    conferenceUris,
   };
 }
 
@@ -1638,7 +1646,7 @@ async function currentCalendarEvent(env: Env, user: { id: string }): Promise<Res
   return json({ event: calendarEventPayload(event) });
 }
 
-/// Ongoing and upcoming events for the Meetings window's "Coming up" list.
+/// Ongoing and upcoming events for the Meetings window's Home list.
 async function upcomingCalendarEvents(url: URL, env: Env, user: { id: string }): Promise<Response> {
   const days = Math.max(1, Math.min(31, Number(url.searchParams.get("days")) || 7));
   const now = Date.now();
@@ -1655,9 +1663,13 @@ interface GoogleCalendarEvent {
   id: string;
   status?: string;
   summary?: string;
+  description?: string;
+  location?: string;
+  hangoutLink?: string;
   start?: { dateTime?: string };
   end?: { dateTime?: string };
   attendees?: Array<{ email?: string; displayName?: string; responseStatus?: string }>;
+  conferenceData?: { entryPoints?: Array<{ uri?: string }> };
 }
 
 class HTTPError extends Error {

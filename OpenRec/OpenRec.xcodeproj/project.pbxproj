@@ -44,6 +44,9 @@
 		A10000D5243B0006 /* AIPromptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000D4243B0006 /* AIPromptStore.swift */; };
 		A100006A243B0001 /* AssemblyAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100007A243B0001 /* AssemblyAIService.swift */; };
 		A10000CA243B0002 /* CalendarMeetingSuggester.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000CB243B0002 /* CalendarMeetingSuggester.swift */; };
+		A1000130243B000B /* HomeAgenda.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000131243B000B /* HomeAgenda.swift */; };
+		A1000132243B000B /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000133243B000B /* HomeViewModel.swift */; };
+		A1000134243B000B /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000135243B000B /* HomeView.swift */; };
 		A100006B243B0001 /* MediaStreamingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100007B243B0001 /* MediaStreamingSession.swift */; };
 		A100006C243B0001 /* MediaStreamingTransports.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100007C243B0001 /* MediaStreamingTransports.swift */; };
 		A100006D243B0001 /* MediaStreamingUploadJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100007D243B0001 /* MediaStreamingUploadJournal.swift */; };
@@ -95,6 +98,9 @@
 		A10000D4243B0006 /* AIPromptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPromptStore.swift; sourceTree = "<group>"; };
 		A100007A243B0001 /* AssemblyAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssemblyAIService.swift; sourceTree = "<group>"; };
 		A10000CB243B0002 /* CalendarMeetingSuggester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarMeetingSuggester.swift; sourceTree = "<group>"; };
+		A1000131243B000B /* HomeAgenda.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeAgenda.swift; sourceTree = "<group>"; };
+		A1000133243B000B /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
+		A1000135243B000B /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		A100007B243B0001 /* MediaStreamingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaStreamingSession.swift; sourceTree = "<group>"; };
 		A100007C243B0001 /* MediaStreamingTransports.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaStreamingTransports.swift; sourceTree = "<group>"; };
 		A100007D243B0001 /* MediaStreamingUploadJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaStreamingUploadJournal.swift; sourceTree = "<group>"; };
@@ -179,6 +185,9 @@
 				A10000D4243B0006 /* AIPromptStore.swift */,
 				A100007A243B0001 /* AssemblyAIService.swift */,
 				A10000CB243B0002 /* CalendarMeetingSuggester.swift */,
+				A1000131243B000B /* HomeAgenda.swift */,
+				A1000133243B000B /* HomeViewModel.swift */,
+				A1000135243B000B /* HomeView.swift */,
 				A1000077243B0001 /* WebhookDeliveryService.swift */,
 				A1000078243B0001 /* RecordingLibraryView.swift */,
 				A1000079243B0001 /* SettingsView.swift */,
@@ -319,6 +328,9 @@
 				A10000D5243B0006 /* AIPromptStore.swift in Sources */,
 				A100006A243B0001 /* AssemblyAIService.swift in Sources */,
 				A10000CA243B0002 /* CalendarMeetingSuggester.swift in Sources */,
+				A1000130243B000B /* HomeAgenda.swift in Sources */,
+				A1000132243B000B /* HomeViewModel.swift in Sources */,
+				A1000134243B000B /* HomeView.swift in Sources */,
 				A1000067243B0001 /* WebhookDeliveryService.swift in Sources */,
 				A1000068243B0001 /* RecordingLibraryView.swift in Sources */,
 				A1000069243B0001 /* SettingsView.swift in Sources */,

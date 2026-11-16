@@ -376,7 +376,7 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
     }
 
     /// Connect (or switch) the Google account whose calendar names calls and
-    /// fills the Coming up list. Deliberately separate from sign-in: the
+    /// fills Home. Deliberately separate from sign-in: the
     /// meeting library stays on the signed-in account no matter which account
     /// is picked here.
     func connectGoogleCalendar() async -> Bool {
@@ -622,7 +622,7 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
         return CalendarCallContext(title: title, participants: participants)
     }
 
-    /// Ongoing and upcoming Google Calendar events for the "Coming up" list.
+    /// Ongoing and upcoming Google Calendar events for Home.
     /// Returns nil when the account cannot serve calendar context (own-R2
     /// mode, signed out, or a sign-in that predates calendar access).
     func upcomingCalendarEvents(withinDays days: Int = 7) async -> [UpcomingCalendarEvent]? {
@@ -653,13 +653,34 @@ final class CloudStorageManager: NSObject, ObservableObject, ASWebAuthentication
                   let startsAt = event["startsAt"] as? String,
                   let start = iso.date(from: startsAt) ?? isoPlain.date(from: startsAt) else { return nil }
             let end = (event["endsAt"] as? String).flatMap { iso.date(from: $0) ?? isoPlain.date(from: $0) } ?? start
+            let attendees = (event["participants"] as? [String] ?? []).filter { name in
+                !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
             return UpcomingCalendarEvent(
                 id: event["id"] as? String ?? "\(title)-\(start.timeIntervalSince1970)",
                 title: title,
                 start: start,
-                end: end
+                end: end,
+                attendees: attendees,
+                linkTexts: Self.calendarLinkTexts(from: event)
             )
         }
+    }
+
+    /// Join-link candidates from a calendar payload, preferred fields first.
+    private static func calendarLinkTexts(from event: [String: Any]) -> [String] {
+        var texts: [String] = []
+        func append(_ value: String?) {
+            guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return }
+            texts.append(value)
+        }
+        append(event["hangoutLink"] as? String)
+        if let uris = event["conferenceUris"] as? [String] {
+            for uri in uris { append(uri) }
+        }
+        append(event["location"] as? String)
+        append(event["description"] as? String)
+        return texts
     }
 
     func saveMeeting(

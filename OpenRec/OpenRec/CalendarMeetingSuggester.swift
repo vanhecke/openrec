@@ -8,6 +8,10 @@ struct UpcomingCalendarEvent: Identifiable, Equatable, Hashable {
     let title: String
     let start: Date
     let end: Date
+    /// Names or emails. Declined guests are left out by the source.
+    var attendees: [String] = []
+    /// Hangout link, conference URIs, location, and notes, in that order.
+    var linkTexts: [String] = []
 }
 
 /// Looks up the calendar event happening around "now" so a call can be
@@ -59,11 +63,26 @@ final class CalendarMeetingSuggester {
                       !title.isEmpty else { return nil }
                 let id = event.eventIdentifier ?? "\(title)-\(start.timeIntervalSince1970)"
                 guard seen.insert(id).inserted else { return nil }
+                let attendees = (event.attendees ?? []).compactMap { participant -> String? in
+                    guard participant.participantStatus != .declined else { return nil }
+                    let name = participant.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    return name.isEmpty ? nil : name
+                }
+                var linkTexts: [String] = []
+                if let url = event.url?.absoluteString, !url.isEmpty { linkTexts.append(url) }
+                if let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines), !location.isEmpty {
+                    linkTexts.append(location)
+                }
+                if let notes = event.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
+                    linkTexts.append(notes)
+                }
                 return UpcomingCalendarEvent(
                     id: id,
                     title: title,
                     start: start,
-                    end: event.endDate ?? start
+                    end: event.endDate ?? start,
+                    attendees: attendees,
+                    linkTexts: linkTexts
                 )
             }
             .sorted { $0.start < $1.start }
